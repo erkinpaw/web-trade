@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebTrade — калькулятор контейнера</title>
+</head>
+<body>
+<style>
+  :root {
+    /* Нейтрали со сдвигом в известняк, акцент — алмазная бирюза. */
+    --ground: #f2f3ef;
+    --surface: #ffffff;
+    --surface-sunk: #eceee7;
+    --line: #dcded6;
+    --line-strong: #c5c9be;
+    --ink: #1c1f21;
+    --muted: #6b7169;
+    --accent: #12707c;
+    --accent-tint: rgba(18, 112, 124, 0.09);
+    --good: #35784a;
+    --warn: #9a6b18;
+    --on-accent: #ffffff;
+
+    --step--2: 0.6875rem;
+    --step--1: 0.8125rem;
+    --step-0: 0.9375rem;
+    --step-1: 1.125rem;
+    --step-3: 2rem;
+
+    --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+
+    --radius: 10px;
+    --gap: 20px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #16181a; --surface: #1d2023; --surface-sunk: #121415;
+      --line: #2c3034; --line-strong: #3c4247;
+      --ink: #e6e9e4; --muted: #949b93;
+      --accent: #56ccd8; --accent-tint: rgba(86, 204, 216, 0.12);
+      --good: #74c489; --warn: #d8ac5a; --on-accent: #10262a;
+    }
+  }
+
+  /* Переключатель темы у зрителя должен побеждать системную настройку в обе стороны. */
+  :root[data-theme="dark"] {
+    --ground: #16181a; --surface: #1d2023; --surface-sunk: #121415;
+    --line: #2c3034; --line-strong: #3c4247;
+    --ink: #e6e9e4; --muted: #949b93;
+    --accent: #56ccd8; --accent-tint: rgba(86, 204, 216, 0.12);
+    --good: #74c489; --warn: #d8ac5a; --on-accent: #10262a;
+  }
+  :root[data-theme="light"] {
+    --ground: #f2f3ef; --surface: #ffffff; --surface-sunk: #eceee7;
+    --line: #dcded6; --line-strong: #c5c9be;
+    --ink: #1c1f21; --muted: #6b7169;
+    --accent: #12707c; --accent-tint: rgba(18, 112, 124, 0.09);
+    --good: #35784a; --warn: #9a6b18; --on-accent: #ffffff;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: clamp(20px, 4vw, 44px) clamp(14px, 4vw, 40px) 64px;
+    background: var(--ground); color: var(--ink);
+    font: var(--step-0)/1.55 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--gap); }
+
+  /* ---------- шапка ---------- */
+
+  .masthead {
+    display: flex; flex-wrap: wrap; gap: var(--gap);
+    align-items: flex-end; justify-content: space-between;
+    padding-bottom: 18px; border-bottom: 1px solid var(--line);
+  }
+  .eyebrow {
+    margin: 0 0 6px; font-size: var(--step--2); font-weight: 600;
+    letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent);
+  }
+  h1 { margin: 0; font-size: var(--step-3); line-height: 1.1; letter-spacing: -0.02em; text-wrap: balance; }
+  .lede { margin: 8px 0 0; max-width: 56ch; color: var(--muted); }
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  .meta { display: flex; gap: 28px; margin: 0; }
+  .meta div { display: flex; flex-direction: column; gap: 2px; }
+  .meta dt { font-size: var(--step--2); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .meta dd { margin: 0; font-family: var(--mono); font-size: var(--step-1); font-variant-numeric: tabular-nums; }
+
+  /* ---------- общие элементы ---------- */
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+
+  input, select, button, textarea {
+    font-family: inherit; font-size: var(--step--1); color: inherit;
+    background: var(--surface); border: 1px solid var(--line-strong);
+    border-radius: 7px; padding: 7px 10px;
+  }
+  :where(input, select, button, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { cursor: pointer; background: var(--surface-sunk); font-weight: 550; }
+  button:hover { border-color: var(--line-strong); background: var(--line); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  button.primary:hover { filter: brightness(1.08); }
+
+  /* ---------- импорт схематики ---------- */
+
+  .importer { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .dropzone {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+    gap: 10px 14px; padding: 18px 16px; text-align: center;
+    border: 1.5px dashed var(--line-strong); border-radius: 8px;
+    background: var(--surface-sunk); cursor: pointer;
+    transition: border-color .12s, background .12s;
+  }
+  .dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); }
+  .dropzone.over { border-color: var(--accent); background: var(--accent-tint); }
+  .dropzone .strong { font-weight: 600; }
+  .dropzone .sub { color: var(--muted); font-size: var(--step--1); }
+
+  .report { display: flex; flex-direction: column; gap: 10px; }
+  .report .figures { display: flex; flex-wrap: wrap; gap: 10px; }
+  .report .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .warnline { margin: 0; font-size: var(--step--1); color: var(--warn); }
+  .failline { margin: 0; font-size: var(--step--1); color: var(--warn); }
+
+  .figure {
+    flex: 1 1 120px; display: flex; flex-direction: column; gap: 2px;
+    padding: 10px 12px; background: var(--surface-sunk);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  .figure .k { font-size: var(--step--2); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+  .figure .v { font-family: var(--mono); font-size: var(--step-1); font-variant-numeric: tabular-nums; }
+  .figure .v.accent { color: var(--accent); }
+
+  /* ---------- рабочая область ---------- */
+
+  .work { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--gap); align-items: start; }
+  @media (max-width: 900px) { .work { grid-template-columns: minmax(0, 1fr); } }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 14px; border-bottom: 1px solid var(--line); }
+  #search { flex: 1 1 220px; min-width: 0; }
+  .toggle { display: inline-flex; align-items: center; gap: 7px; font-size: var(--step--1); color: var(--muted); cursor: pointer; }
+  .toggle input { accent-color: var(--accent); }
+
+  .tablewrap { overflow-x: auto; max-height: 58vh; overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--step--1); }
+  thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--surface); border-bottom: 1px solid var(--line-strong);
+    padding: 10px 12px; text-align: left; white-space: nowrap;
+    font-size: var(--step--2); font-weight: 600;
+    letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
+  }
+  tbody td { padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr:hover td { background: var(--surface-sunk); }
+  .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ident { font-family: var(--mono); font-size: var(--step--2); color: var(--muted); }
+  .resource { min-width: 150px; }
+
+  /* Выбранное читается формой, а не только числом: полоса слева плюс заливка. */
+  tbody tr[data-picked] td { background: var(--accent-tint); }
+  tbody tr[data-picked] td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  tbody tr[data-picked]:hover td { background: var(--accent-tint); }
+
+  .qty { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+  .unit { padding: 6px 6px; }
+  .cost { color: var(--muted); }
+  tr[data-picked] .cost { color: var(--ink); font-weight: 550; }
+
+  .shown { margin: 0; padding: 10px 14px; border-top: 1px solid var(--line); font-size: var(--step--2); color: var(--muted); }
+  .empty { padding: 28px 14px; text-align: center; color: var(--muted); font-size: var(--step--1); }
+
+  /* ---------- сводка заказа ---------- */
+
+  .order { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+  @media (max-width: 900px) { .order { position: static; } }
+  .order h2 { margin: 0; font-size: var(--step-1); letter-spacing: -0.01em; }
+
+  textarea {
+    width: 100%; min-height: 190px; resize: vertical;
+    font-family: var(--mono); font-size: var(--step--1); line-height: 1.5;
+    background: var(--surface-sunk);
+  }
+  textarea::placeholder { color: var(--muted); }
+
+  .actions { display: flex; gap: 8px; }
+  .order .actions button { flex: 1; }
+  .note { margin: 0; min-height: 1.5em; font-size: var(--step--2); color: var(--muted); }
+  .note.done { color: var(--good); }
+  .hint { margin: 0; font-size: var(--step--2); color: var(--muted); }
+  .hint code { font-family: var(--mono); color: var(--ink); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+
+<div class="app">
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">WebTrade · биржа ресурсов</p>
+      <h1>Калькулятор контейнера</h1>
+      <p class="lede">Наберите нужные ресурсы или загрузите схематику, скопируйте список
+        и вставьте его в игре: <b>Меню → Вставить список</b>.</p>
+    </div>
+    <dl class="meta">
+      <div><dt>Ресурсов</dt><dd id="catalogSize">—</dd></div>
+      <div><dt>Цены на</dt><dd id="stamp">—</dd></div>
+    </dl>
+  </header>
+
+  <section class="card importer">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button"
+         aria-label="Загрузить схематику">
+      <span class="strong">Перетащите схематику сюда</span>
+      <span class="sub">или нажмите, чтобы выбрать файл · .schematic и .schem · файл никуда не отправляется</span>
+      <input type="file" id="file" accept=".schematic,.schem" hidden>
+    </div>
+    <div class="report" id="report" hidden></div>
+  </section>
+
+  <div class="work">
+    <section class="card">
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Поиск: stone, planks, glass…" autocomplete="off">
+        <label class="toggle"><input type="checkbox" id="onlyPicked"> только выбранные</label>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="resource">Ресурс</th>
+              <th class="num">Цена за стак</th>
+              <th class="num">Количество</th>
+              <th class="num">Единицы</th>
+              <th class="num">Стоимость</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="shown" id="shown"></p>
+    </section>
+
+    <aside class="card order">
+      <h2>Контейнер</h2>
+      <div class="figures">
+        <div class="figure"><span class="k">позиций</span><span class="v" id="count">0</span></div>
+        <div class="figure"><span class="k">итого</span><span class="v accent" id="total">0.00 ар</span></div>
+      </div>
+      <textarea id="out" readonly placeholder="Здесь появится список для вставки в игру"></textarea>
+      <div class="actions">
+        <button class="primary" id="copy">Скопировать</button>
+        <button id="clear">Очистить</button>
+      </div>
+      <p class="note" id="note"></p>
+      <p class="hint">Игра понимает и стаки: <code>oak_planks 12s</code> — это 768 штук.</p>
+    </aside>
+  </div>
+</div>
+
+<script>
+  const CATALOG = __CATALOG_JSON__;
+  /** Старые числовые ID блоков: собрать такую таблицу может только сервер. */
+  const LEGACY = __LEGACY_JSON__;
+  const STAMP = "__STAMP__";
+
+  const STACK = 64;
+  const SHULKER = 27 * 64;
+  const RENDER_CAP = 300;
+  const MAX_FILE = 64 * 1024 * 1024;
+
+  /** id → {amount, unit}; хранится отдельно от таблицы, поэтому переживает фильтрацию. */
+  const picked = new Map();
+  const byId = new Map(CATALOG.map(r => [r.id, r]));
+
+  const rowsEl = document.getElementById("rows");
+  const searchEl = document.getElementById("search");
+  const onlyPickedEl = document.getElementById("onlyPicked");
+  const noteEl = document.getElementById("note");
+  const reportEl = document.getElementById("report");
+  const dropzoneEl = document.getElementById("dropzone");
+  const fileEl = document.getElementById("file");
+
+  document.getElementById("stamp").textContent = STAMP;
+  document.getElementById("catalogSize").textContent = CATALOG.length;
+
+  const unitSize = unit => unit === "stack" ? STACK : unit === "shulker" ? SHULKER : 1;
+  const unitsOf = id => { const p = picked.get(id); return p ? p.amount * unitSize(p.unit) : 0; };
+  const costOf = id => unitsOf(id) * byId.get(id).price / STACK;
+  const money = value => value.toFixed(2);
+  const grouped = value => value.toLocaleString("ru-RU");
+
+  // ======================= каталог =======================
+
+  function visibleRows() {
+    const query = searchEl.value.trim().toLowerCase();
+    return CATALOG.filter(r => {
+      if (onlyPickedEl.checked && !picked.has(r.id)) return false;
+      if (!query) return true;
+      return r.id.toLowerCase().includes(query) || r.name.toLowerCase().includes(query);
+    });
+  }
+
+  function render() {
+    const list = visibleRows();
+    const slice = list.slice(0, RENDER_CAP);
+    rowsEl.innerHTML = "";
+
+    if (!slice.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="empty" colspan="5">${
+        onlyPickedEl.checked ? "Пока ничего не выбрано." : "Ничего не нашлось."}</td>`;
+      rowsEl.appendChild(tr);
+    }
+
+    for (const r of slice) {
+      const p = picked.get(r.id);
+      const tr = document.createElement("tr");
+      if (p) tr.dataset.picked = "";
+      tr.innerHTML =
+        `<td class="resource">${r.name}<br><span class="ident">${r.id}</span></td>` +
+        `<td class="num">${money(r.price)} ар</td>` +
+        `<td class="num"><input class="qty" type="number" min="0" step="1" inputmode="numeric"
+              data-id="${r.id}" value="${p ? p.amount : ""}" placeholder="0"
+              aria-label="Количество: ${r.name}"></td>` +
+        `<td class="num"><select class="unit" data-unit="${r.id}" aria-label="Единицы: ${r.name}">
+              <option value="item">шт.</option>
+              <option value="stack">стаки</option>
+              <option value="shulker">шалкеры</option>
+            </select></td>` +
+        `<td class="num cost">${p ? money(costOf(r.id)) + " ар" : "—"}</td>`;
+      rowsEl.appendChild(tr);
+      if (p) tr.querySelector("[data-unit]").value = p.unit;
+    }
+
+    document.getElementById("shown").textContent = list.length > RENDER_CAP
+      ? `Показаны первые ${RENDER_CAP} из ${list.length} — уточните поиск`
+      : `Показано ${list.length} из ${CATALOG.length}`;
+
+    summarise();
+  }
+
+  function summarise() {
+    let total = 0;
+    const lines = [];
+    for (const r of CATALOG) {
+      const units = unitsOf(r.id);
+      if (units > 0) {
+        total += units * r.price / STACK;
+        lines.push(`${r.id} ${units}`);
+      }
+    }
+    document.getElementById("count").textContent = lines.length;
+    document.getElementById("total").textContent = money(total) + " ар";
+    document.getElementById("out").value = lines.join("\n");
+  }
+
+  function setPick(id, amount, unit) {
+    if (!Number.isFinite(amount) || amount <= 0) picked.delete(id);
+    else picked.set(id, { amount, unit });
+  }
+
+  rowsEl.addEventListener("input", event => {
+    const input = event.target.closest("input.qty");
+    if (!input) return;
+    const id = input.dataset.id;
+    const unit = rowsEl.querySelector(`[data-unit="${id}"]`).value;
+    setPick(id, parseInt(input.value, 10), unit);
+
+    const row = input.closest("tr");
+    if (picked.has(id)) row.dataset.picked = ""; else delete row.dataset.picked;
+    row.lastElementChild.textContent = picked.has(id) ? money(costOf(id)) + " ар" : "—";
+    summarise();
+  });
+
+  rowsEl.addEventListener("change", event => {
+    const select = event.target.closest("[data-unit]");
+    if (!select) return;
+    const id = select.dataset.unit;
+    const input = rowsEl.querySelector(`input.qty[data-id="${id}"]`);
+    setPick(id, parseInt(input.value, 10), select.value);
+    render();
+  });
+
+  searchEl.addEventListener("input", render);
+  onlyPickedEl.addEventListener("change", render);
+
+  document.getElementById("clear").addEventListener("click", () => {
+    picked.clear();
+    noteEl.textContent = "";
+    noteEl.classList.remove("done");
+    render();
+  });
+
+  document.getElementById("copy").addEventListener("click", async () => {
+    const out = document.getElementById("out");
+    if (!out.value) {
+      noteEl.classList.remove("done");
+      noteEl.textContent = "Список пуст — выберите хотя бы один ресурс.";
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(out.value);
+      noteEl.classList.add("done");
+      noteEl.textContent = "Скопировано. В игре: Меню → Вставить список.";
+    } catch {
+      out.select();
+      noteEl.classList.remove("done");
+      noteEl.textContent = "Браузер не дал доступ к буферу — текст выделен, нажмите Ctrl+C.";
+    }
+  });
+
+  // ======================= чтение NBT =======================
+
+  /** Минимальный читатель NBT: только то, что встречается в схематиках. */
+  class Nbt {
+    constructor(buffer) {
+      this.view = new DataView(buffer);
+      this.at = 0;
+    }
+    u8() { return this.view.getUint8(this.at++); }
+    i16() { const v = this.view.getInt16(this.at); this.at += 2; return v; }
+    u16() { const v = this.view.getUint16(this.at); this.at += 2; return v; }
+    i32() { const v = this.view.getInt32(this.at); this.at += 4; return v; }
+    i64() { const v = this.view.getBigInt64(this.at); this.at += 8; return v; }
+    f32() { const v = this.view.getFloat32(this.at); this.at += 4; return v; }
+    f64() { const v = this.view.getFloat64(this.at); this.at += 8; return v; }
+    str() {
+      const length = this.u16();
+      const bytes = new Uint8Array(this.view.buffer, this.view.byteOffset + this.at, length);
+      this.at += length;
+      return new TextDecoder("utf-8").decode(bytes);
+    }
+    bytes(length) {
+      const slice = new Int8Array(this.view.buffer, this.view.byteOffset + this.at, length);
+      this.at += length;
+      return slice;
+    }
+    payload(type) {
+      switch (type) {
+        case 1: return this.view.getInt8(this.at++);
+        case 2: return this.i16();
+        case 3: return this.i32();
+        case 4: return this.i64();
+        case 5: return this.f32();
+        case 6: return this.f64();
+        case 7: return this.bytes(this.i32());
+        case 8: return this.str();
+        case 9: {
+          const itemType = this.u8();
+          const count = this.i32();
+          const list = [];
+          for (let i = 0; i < count; i++) list.push(this.payload(itemType));
+          return list;
+        }
+        case 10: return this.compound();
+        case 11: { const n = this.i32(); const a = new Int32Array(n); for (let i = 0; i < n; i++) a[i] = this.i32(); return a; }
+        case 12: { const n = this.i32(); const a = new BigInt64Array(n); for (let i = 0; i < n; i++) a[i] = this.i64(); return a; }
+        default: throw new Error("неизвестный тег NBT: " + type);
+      }
+    }
+    compound() {
+      const result = {};
+      for (;;) {
+        const type = this.u8();
+        if (type === 0) return result;
+        result[this.str()] = this.payload(type);
+      }
+    }
+    root() {
+      const type = this.u8();
+      if (type !== 10) throw new Error("файл не начинается с NBT-структуры");
+      this.str();
+      return this.compound();
+    }
+  }
+
+  async function ungzip(buffer) {
+    const head = new Uint8Array(buffer, 0, Math.min(2, buffer.byteLength));
+    if (head[0] !== 0x1f || head[1] !== 0x8b) return buffer;   // уже распакован
+    const stream = new Blob([buffer]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return await new Response(stream).arrayBuffer();
+  }
+
+  // ======================= разбор схематик =======================
+
+  /** «minecraft:oak_stairs[facing=east]» → «OAK_STAIRS» */
+  function stateToId(state) {
+    const bare = String(state).split("[")[0].replace(/^minecraft:/, "");
+    return bare.toUpperCase();
+  }
+
+  function legacyToId(blockId, data) {
+    const entry = LEGACY[blockId];
+    if (entry === undefined) return null;
+    if (typeof entry === "string") return entry;
+    return entry[data] ?? entry[0] ?? null;
+  }
+
+  /** Sponge .schem: палитра «состояние → индекс» плюс поток varint'ов. */
+  function parseSponge(container) {
+    const blocks = container.Blocks && container.Blocks.Palette ? container.Blocks : container;
+    const palette = blocks.Palette;
+    const data = blocks.Data || blocks.BlockData;
+    if (!palette || !data) return null;
+
+    const byIndex = [];
+    for (const [state, index] of Object.entries(palette)) byIndex[Number(index)] = stateToId(state);
+
+    const counts = new Map();
+    let at = 0, total = 0;
+    while (at < data.length) {
+      let value = 0, shift = 0;
+      for (;;) {
+        const byte = data[at++] & 0xFF;
+        value |= (byte & 0x7F) << shift;
+        if ((byte & 0x80) === 0) break;
+        shift += 7;
+        if (shift > 35) throw new Error("испорченный поток блоков");
+      }
+      const id = byIndex[value];
+      total++;
+      if (id && id !== "AIR" && id !== "CAVE_AIR" && id !== "VOID_AIR") {
+        counts.set(id, (counts.get(id) || 0) + 1);
+      }
+    }
+    return {
+      counts,
+      size: [container.Width ?? blocks.Width ?? 0, container.Height ?? blocks.Height ?? 0,
+             container.Length ?? blocks.Length ?? 0],
+      scanned: total,
+      unknown: 0,
+      format: "Sponge .schem"
+    };
+  }
+
+  /** MCEdit .schematic: старые числовые ID, поэтому нужна таблица с сервера. */
+  function parseLegacy(root) {
+    const blocks = root.Blocks;
+    if (!blocks) return null;
+    const extra = root.Data;
+    const add = root.AddBlocks;
+
+    const counts = new Map();
+    let unknown = 0, scanned = 0;
+    for (let i = 0; i < blocks.length; i++) {
+      let id = blocks[i] & 0xFF;
+      if (add && (i >> 1) < add.length) {
+        // AddBlocks хранит старшие 4 бита ID по половинке байта на блок
+        id |= (i & 1) === 0 ? (add[i >> 1] & 0x0F) << 8 : (add[i >> 1] & 0xF0) << 4;
+      }
+      if (id === 0) continue;
+      scanned++;
+      const data = extra && i < extra.length ? (extra[i] & 0x0F) : 0;
+      const material = legacyToId(id, data);
+      if (material) counts.set(material, (counts.get(material) || 0) + 1);
+      else unknown++;
+    }
+    return {
+      counts, unknown, scanned,
+      size: [root.Width ?? 0, root.Height ?? 0, root.Length ?? 0],
+      format: "MCEdit .schematic"
+    };
+  }
+
+  async function readSchematic(file) {
+    if (file.size > MAX_FILE) throw new Error("файл больше 64 МБ");
+    const raw = await file.arrayBuffer();
+    const root = new Nbt(await ungzip(raw)).root();
+
+    if (root.Regions) throw new Error("формат .litematic пока не поддерживается");
+
+    const parsed = parseSponge(root.Schematic || root) || parseLegacy(root);
+    if (!parsed) throw new Error("не похоже на схематику: нет ни палитры, ни блоков");
+    if (parsed.format === "MCEdit .schematic" && Object.keys(LEGACY).length === 0) {
+      throw new Error("для старого формата нужна таблица блоков — выгрузите страницу через /tradecalc");
+    }
+    return parsed;
+  }
+
+  // ======================= отчёт по схематике =======================
+
+  function showReport(parsed, fileName) {
+    const tradeable = new Map();
+    const foreign = new Map();
+    for (const [id, count] of parsed.counts) {
+      (byId.has(id) ? tradeable : foreign).set(id, count);
+    }
+    const tradeableTotal = [...tradeable.values()].reduce((a, b) => a + b, 0);
+    const cost = [...tradeable].reduce((sum, [id, n]) => sum + n * byId.get(id).price / STACK, 0);
+    const [w, h, l] = parsed.size;
+
+    reportEl.hidden = false;
+    reportEl.innerHTML =
+      `<div class="figures">
+         <div class="figure"><span class="k">размер</span><span class="v">${w}×${h}×${l}</span></div>
+         <div class="figure"><span class="k">блоков</span><span class="v">${grouped(tradeableTotal)}</span></div>
+         <div class="figure"><span class="k">позиций</span><span class="v">${tradeable.size}</span></div>
+         <div class="figure"><span class="k">выйдет в</span><span class="v accent">${money(cost)} ар</span></div>
+       </div>
+       <p class="hint">${fileName} · ${parsed.format}</p>
+       <div class="actions">
+         <button class="primary" id="applySchem">Добавить в заказ</button>
+         <button id="replaceSchem">Заменить заказ</button>
+         <button id="dropSchem">Отменить</button>
+       </div>`;
+
+    const notes = [];
+    if (foreign.size) {
+      const top = [...foreign].sort((a, b) => b[1] - a[1]).slice(0, 4)
+        .map(([id, n]) => `${id} × ${grouped(n)}`).join(", ");
+      notes.push(`Не торгуются и пропущены: ${foreign.size} видов (${top}${foreign.size > 4 ? ", …" : ""}).`);
+    }
+    if (parsed.unknown) notes.push(`Не опознано блоков: ${grouped(parsed.unknown)}.`);
+    for (const text of notes) {
+      const p = document.createElement("p");
+      p.className = "warnline";
+      p.textContent = text;
+      reportEl.appendChild(p);
+    }
+
+    const apply = replace => {
+      if (replace) picked.clear();
+      for (const [id, count] of tradeable) {
+        const already = replace ? 0 : unitsOf(id);
+        setPick(id, already + count, "item");
+      }
+      reportEl.hidden = true;
+      noteEl.classList.add("done");
+      noteEl.textContent = `Из схематики добавлено позиций: ${tradeable.size}.`;
+      render();
+    };
+    reportEl.querySelector("#applySchem").addEventListener("click", () => apply(false));
+    reportEl.querySelector("#replaceSchem").addEventListener("click", () => apply(true));
+    reportEl.querySelector("#dropSchem").addEventListener("click", () => { reportEl.hidden = true; });
+  }
+
+  function showFailure(message) {
+    reportEl.hidden = false;
+    reportEl.innerHTML = `<p class="failline">Не вышло прочитать: ${message}</p>`;
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+    reportEl.hidden = false;
+    reportEl.innerHTML = `<p class="hint">Читаю ${file.name}…</p>`;
+    try {
+      showReport(await readSchematic(file), file.name);
+    } catch (error) {
+      showFailure(error.message || String(error));
+    }
+  }
+
+  dropzoneEl.addEventListener("click", () => fileEl.click());
+  dropzoneEl.addEventListener("keydown", event => {
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fileEl.click(); }
+  });
+  fileEl.addEventListener("change", () => handleFile(fileEl.files[0]));
+
+  for (const type of ["dragenter", "dragover"]) {
+    dropzoneEl.addEventListener(type, event => {
+      event.preventDefault();
+      dropzoneEl.classList.add("over");
+    });
+  }
+  for (const type of ["dragleave", "dragend"]) {
+    dropzoneEl.addEventListener(type, () => dropzoneEl.classList.remove("over"));
+  }
+  dropzoneEl.addEventListener("drop", event => {
+    event.preventDefault();
+    dropzoneEl.classList.remove("over");
+    handleFile(event.dataTransfer.files[0]);
+  });
+  // Промах мимо зоны не должен превращать вкладку в просмотрщик файла.
+  window.addEventListener("dragover", event => event.preventDefault());
+  window.addEventListener("drop", event => event.preventDefault());
+
+  render();
+</script>
+</body>
+</html>

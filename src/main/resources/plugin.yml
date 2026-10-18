@@ -1,0 +1,58 @@
+name: WebTrade
+version: '${version}'
+
+main: org.webtrade.webTrade.WebTrade
+api-version: '26.2'
+load: POSTWORLD
+
+commands:
+  trade:
+    description: Главное меню биржи
+    aliases: [market, wt, birzha]
+    usage: /trade
+  balance:
+    description: Открыть меню биржи (баланс наверху)
+    aliases: [ares, bal]
+    usage: /balance
+  deposit:
+    description: Открыть интерфейс внесения руды на счёт
+    usage: /deposit
+  withdraw:
+    description: Снять руду со счёта
+    usage: /withdraw [amount]
+  sell:
+    description: Сдать ресурсы на биржу
+    usage: /sell
+  container:
+    description: Показать свои контейнеры
+    aliases: [containers]
+    usage: /container
+  demand:
+    description: Посмотреть спрос на ресурсы
+    aliases: [spros]
+    usage: /demand
+    permission: webtrade.demand
+  stock:
+    description: Показать свои ресурсы на складе
+    usage: /stock
+    permission: webtrade.stock
+  tradestand:
+    description: Расстановка стендов торгового центра
+    aliases: [stand]
+    usage: /tradestand create|remove|list
+    permission: webtrade.admin
+  tradecalc:
+    description: Выгрузить страницу калькулятора с текущими ценами
+    usage: /tradecalc
+    permission: webtrade.admin
+
+permissions:
+  webtrade.demand:
+    description: Доступ к списку спроса
+    default: true
+  webtrade.stock:
+    description: Доступ к своему складу
+    default: true
+  webtrade.admin:
+    description: Управление стендами и выгрузка калькулятора
+    default: op
