@@ -251,20 +251,23 @@ public final class Screens {
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Создать контейнер", NamedTextColor.GOLD))
                         .body(List.of(DialogBody.plainMessage(Ui.text(
-                                "Назовите заказ, чтобы отличать его от других — например «Храм».\n"
-                                        + "Ниже вставьте список: по строке на ресурс, название и количество.\n"
-                                        + "Например «STONE 3000» или «oak_planks 12s» (s — стаки)."))))
+                                "Вставьте список: по строке на ресурс, название и количество.\n"
+                                        + "Например «STONE 3000» или «oak_planks 12s» (s — стаки).\n"
+                                        + "Ниже назовите заказ, чтобы отличать его от других — например «Храм»."))))
+                        // Список первым: клиент рисует счётчик символов под многострочным полем поверх
+                        // того, что ниже. Под ним должна быть подпись поля (она слева, счётчик справа),
+                        // а не кнопка «Оплатить» во всю ширину.
                         .inputs(List.of(
-                                DialogInput.text("name", Ui.text("Название", NamedTextColor.WHITE))
-                                        .initial(cartOf(player).title())
-                                        .maxLength(Container.MAX_NAME)
-                                        .width(300)
-                                        .build(),
                                 DialogInput.text("list", Ui.text("Список", NamedTextColor.WHITE))
                                         .maxLength(MAX_PASTE_LENGTH)
                                         .width(300)
                                         .multiline(TextDialogInput.MultilineOptions.create(
                                                 MAX_PASTE_LINES, 260))
+                                        .build(),
+                                DialogInput.text("name", Ui.text("Название", NamedTextColor.WHITE))
+                                        .initial(cartOf(player).title())
+                                        .maxLength(Container.MAX_NAME)
+                                        .width(300)
                                         .build()))
                         .afterAction(DialogBase.DialogAfterAction.CLOSE)
                         .build())

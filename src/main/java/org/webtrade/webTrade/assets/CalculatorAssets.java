@@ -52,12 +52,16 @@ public final class CalculatorAssets {
     private static final int ICON_SIZE = 64;
     private static final int COLUMNS = 32;
     /** Поднимайте, если поменялся способ рисования — старый кэш тогда перерисуется. */
-    private static final String ASSET_VERSION = "3";
+    private static final String ASSET_VERSION = "4";
 
-    /** Что получилось: имена по ID материала и номер значка в атласе. */
-    public record Result(Map<String, String> names, Map<String, Integer> icons, int size, int columns) {
+    /**
+     * Что получилось: имена по ID материала, номер значка в атласе и ширина символов шрифта
+     * игры в пикселях (код символа → ширина с пробелом после) — по ней стенды выравнивают колонки.
+     */
+    public record Result(Map<String, String> names, Map<String, Integer> icons, Map<Integer, Integer> glyphs,
+                         int size, int columns) {
         public static Result empty() {
-            return new Result(Map.of(), Map.of(), ICON_SIZE, COLUMNS);
+            return new Result(Map.of(), Map.of(), Map.of(), ICON_SIZE, COLUMNS);
         }
 
         public boolean hasIcons() {
@@ -91,13 +95,16 @@ public final class CalculatorAssets {
             json.getAsJsonObject("names").entrySet().forEach(e -> names.put(e.getKey(), e.getValue().getAsString()));
             Map<String, Integer> icons = new LinkedHashMap<>();
             json.getAsJsonObject("icons").entrySet().forEach(e -> icons.put(e.getKey(), e.getValue().getAsInt()));
+            Map<Integer, Integer> glyphs = new java.util.HashMap<>();
+            json.getAsJsonObject("glyphs").entrySet().forEach(e ->
+                    glyphs.put(Integer.parseInt(e.getKey()), e.getValue().getAsInt()));
             // в каталоге появились ресурсы, которых атлас ещё не видел — перерисуем
             java.util.Set<String> known = new java.util.HashSet<>(icons.keySet());
             json.getAsJsonArray("missing").forEach(e -> known.add(e.getAsString()));
             if (!known.containsAll(ids)) {
                 return Result.empty();
             }
-            return new Result(names, icons, ICON_SIZE, COLUMNS);
+            return new Result(names, icons, glyphs, ICON_SIZE, COLUMNS);
         } catch (Exception e) {
             return Result.empty();
         }
@@ -116,17 +123,19 @@ public final class CalculatorAssets {
             JsonObject version = versionJson(http, minecraftVersion);
             Map<String, String> names = names(http, version, ids);
             Map<String, Integer> icons = new LinkedHashMap<>();
-            List<String> missingIcons = icons(http, version, ids, icons);
+            Map<Integer, Integer> glyphs = new java.util.HashMap<>();
+            List<String> missingIcons = icons(http, version, ids, icons, glyphs);
 
             JsonObject index = new JsonObject();
             index.addProperty("stamp", stamp(minecraftVersion));
             index.add("names", gson.toJsonTree(names));
             index.add("icons", gson.toJsonTree(icons));
+            index.add("glyphs", gson.toJsonTree(glyphs));
             index.add("missing", gson.toJsonTree(missingIcons));
             Files.writeString(cacheDir.resolve("index.json"), gson.toJson(index), StandardCharsets.UTF_8);
             logger.info("Калькулятор: названий " + names.size() + ", значков " + icons.size()
                     + (missingIcons.isEmpty() ? "." : ", без значка " + missingIcons.size() + ": " + missingIcons));
-            return new Result(names, icons, ICON_SIZE, COLUMNS);
+            return new Result(names, icons, glyphs, ICON_SIZE, COLUMNS);
         } catch (Exception e) {
             logger.warning("Калькулятор останется без значков и русских названий: " + e.getMessage());
             return Result.empty();
@@ -173,8 +182,8 @@ public final class CalculatorAssets {
     // ---------- значки ----------
 
     /** Рисует атлас; возвращает ID, для которых значок не получился. */
-    private List<String> icons(HttpClient http, JsonObject version, List<String> ids, Map<String, Integer> out)
-            throws Exception {
+    private List<String> icons(HttpClient http, JsonObject version, List<String> ids, Map<String, Integer> out,
+                               Map<Integer, Integer> glyphs) throws Exception {
         String clientUrl = version.getAsJsonObject("downloads").getAsJsonObject("client").get("url").getAsString();
         Path jar = Files.createTempFile("mc-client", ".jar");
         List<String> missing = new java.util.ArrayList<>();
@@ -191,6 +200,7 @@ public final class CalculatorAssets {
             // плоские 16×16 текстуры увеличиваем без размытия — как в игре
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
             try (ZipFile zip = new ZipFile(jar.toFile())) {
+                glyphs.putAll(glyphWidths(zip));
                 ModelRenderer renderer = new ModelRenderer(zip);
                 int slot = 0;
                 for (String id : ids) {
@@ -213,6 +223,63 @@ public final class CalculatorAssets {
             Files.deleteIfExists(jar);
         }
         return missing;
+    }
+
+    /**
+     * Ширина символов обычного шрифта игры, как её считает клиент: пробелы — из своего
+     * провайдера, буквы — по картинке шрифта (последний непустой столбец глифа, масштаб
+     * под высоту шрифта, плюс пиксель между буквами). Кто раньше в списке, тот и главный.
+     */
+    private Map<Integer, Integer> glyphWidths(ZipFile zip) throws IOException {
+        Map<Integer, Integer> widths = new java.util.HashMap<>();
+        JsonObject space = readJson(zip, "assets/minecraft/font/include/space.json");
+        if (space != null) {
+            for (JsonElement provider : space.getAsJsonArray("providers")) {
+                JsonObject advances = provider.getAsJsonObject().getAsJsonObject("advances");
+                if (advances != null) {
+                    advances.entrySet().forEach(e -> widths.putIfAbsent(e.getKey().codePointAt(0),
+                            (int) Math.round(e.getValue().getAsDouble())));
+                }
+            }
+        }
+        JsonObject font = readJson(zip, "assets/minecraft/font/include/default.json");
+        if (font == null) {
+            return widths;
+        }
+        for (JsonElement element : font.getAsJsonArray("providers")) {
+            JsonObject provider = element.getAsJsonObject();
+            if (!"bitmap".equals(provider.get("type").getAsString())) {
+                continue;
+            }
+            BufferedImage sheet = read(zip, "assets/minecraft/textures/" + strip(provider.get("file").getAsString()));
+            if (sheet == null) {
+                continue;
+            }
+            List<String> rows = new java.util.ArrayList<>();
+            provider.getAsJsonArray("chars").forEach(row -> rows.add(row.getAsString()));
+            int columns = rows.getFirst().codePointCount(0, rows.getFirst().length());
+            int cellW = sheet.getWidth() / columns, cellH = sheet.getHeight() / rows.size();
+            double scale = (provider.has("height") ? provider.get("height").getAsInt() : 8) / (double) cellH;
+            for (int r = 0; r < rows.size(); r++) {
+                int[] points = rows.get(r).codePoints().toArray();
+                for (int c = 0; c < points.length; c++) {
+                    if (points[c] == 0 || widths.containsKey(points[c])) {
+                        continue;
+                    }
+                    int last = -1;
+                    for (int x = cellW - 1; x >= 0 && last < 0; x--) {
+                        for (int y = 0; y < cellH; y++) {
+                            if ((sheet.getRGB(c * cellW + x, r * cellH + y) >>> 24) != 0) {
+                                last = x;
+                                break;
+                            }
+                        }
+                    }
+                    widths.put(points[c], (int) (0.5 + (last + 1) * scale) + 1);
+                }
+            }
+        }
+        return widths;
     }
 
     /** Значок как в инвентаре: плоская текстура предмета, иначе модель блока, иначе хоть какая-то текстура. */

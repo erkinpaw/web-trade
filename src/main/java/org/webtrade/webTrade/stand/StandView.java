@@ -3,7 +3,10 @@ package org.webtrade.webTrade.stand;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Color;
+import org.bukkit.Material;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.Location;
+import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Interaction;
@@ -15,34 +18,46 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
+import org.webtrade.webTrade.assets.CalculatorAssets;
 import org.webtrade.webTrade.ui.Ui;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
- * Персональная копия стенда для одного игрока: вертикальный список ресурсов на подложке.
+ * Персональная копия стенда для одного игрока: плоская доска с тёмной подложкой.
+ * <p>
+ * Все надписи развёрнуты в одну сторону (как табличка), а не каждая к камере: так доска
+ * читается как одно целое. Значки — сами предметы в «инвентарном» ракурсе (ступеньки выглядят
+ * ступеньками), сплющенные в картинку: с какой стороны ни смотри, это значок, а не кубик.
  * <p>
  * Сущности спавнятся с {@code setVisibleByDefault(false)} и показываются только своему
- * зрителю — поэтому двое могут стоять у одного стенда и листать разные места списка.
- * Прокрутка не пересоздаёт сущности, а меняет их содержимое, поэтому длина списка
- * за окном не стоит ничего.
+ * зрителю — двое могут стоять у одного стенда и листать разные места списка.
+ * Прокрутка не пересоздаёт сущности, а меняет их текст.
+ * <p>
+ * Нажимается только кнопка «Меню». Строки — витрина: на клик не отвечают, иначе каждое
+ * случайное нажатие ПКМ по доске писало бы в чат.
  */
 public final class StandView {
 
-    /** Фона нет: надписи висят прямо в воздухе. */
     private static final Color TRANSPARENT = Color.fromARGB(0, 0, 0, 0);
+    /**
+     * Подложка (чёрный бетон) и подсветка (жёлтое стекло) — тонкие пластины (block display). У них точная
+     * геометрия: фон текста растягивался бы со шрифтовыми отступами и съезжал вбок.
+     */
+    private static final BlockData PANEL = Material.BLACK_CONCRETE.createBlockData();
+    private static final BlockData HOVER = Material.YELLOW_STAINED_GLASS.createBlockData();
+    private static final BlockData NONE = Material.AIR.createBlockData();
 
     private static final float ICON_SCALE = 0.26f;
-    private static final float TEXT_SCALE = 0.40f;
-    private static final float CAPTION_SCALE = 0.35f;
-    private static final float HEADER_SCALE = 0.70f;
+    /** Толщина значка: почти ноль — модель предмета становится плоской картинкой. */
+    private static final float ICON_DEPTH = 0.001f;
+    private static final float TEXT_SCALE = 0.50f;
+    private static final float CAPTION_SCALE = 0.40f;
+    private static final float HEADER_SCALE = 0.80f;
     private static final float MENU_SCALE = 0.85f;
-    private static final float ARROW_SCALE = 0.65f;
     /** Множитель дальности прорисовки: дальше клиент стенд не рисует. */
     private static final float VIEW_RANGE = 0.6f;
     /** Подложка тёмная, поэтому светим всё изнутри — иначе ночью стенд не прочитать. */
@@ -52,56 +67,56 @@ public final class StandView {
     private final BoardLayout layout;
     private final Player viewer;
     private final StandContent content;
+    /** Русские названия и ширина букв шрифта игры — по ним колонки выравниваются по краю. */
+    private final Supplier<CalculatorAssets.Result> assets;
 
     private final List<Entity> spawned = new ArrayList<>();
     private final List<ItemDisplay> icons = new ArrayList<>();
+    /** Полоса под каждой строкой: подсветка просто включается, а не ездит — так она не мигает. */
+    private final List<BlockDisplay> strips = new ArrayList<>();
     private final List<TextDisplay> names = new ArrayList<>();
     private final List<TextDisplay> demands = new ArrayList<>();
     private final List<TextDisplay> prices = new ArrayList<>();
-    private final List<Interaction> hitboxes = new ArrayList<>();
-    /** Что делать по клику: ключ — UUID Interaction-сущности. */
-    private final Map<UUID, Consumer<Player>> actions = new HashMap<>();
 
     private TextDisplay header;
     private TextDisplay footer;
+    private Interaction menu;
 
     private int offset;
     private int hovered = -1;
     private List<StandContent.Row> rows = List.of();
 
-    public StandView(Plugin plugin, BoardLayout layout, Player viewer, StandContent content) {
+    public StandView(Plugin plugin, BoardLayout layout, Player viewer, StandContent content,
+                     Supplier<CalculatorAssets.Result> assets) {
         this.plugin = plugin;
         this.layout = layout;
         this.viewer = viewer;
         this.content = content;
+        this.assets = assets;
     }
 
     // ---------- сборка ----------
 
     public void spawn() {
+        panel(layout.panel(), layout.panelWidth(), layout.panelHeight(), PANEL, 0.06f);
+
         header = text(layout.header(), HEADER_SCALE);
-        caption(layout.captions(), -1.15, "ресурс");
-        caption(layout.captions(), 0.75, "нужно");
-        caption(layout.captions(), 1.95, "за стак");
+        caption(layout.captions(), BoardLayout.NAME_LEFT, "ресурс", LEFT);
+        caption(layout.captions(), BoardLayout.DEMAND_RIGHT, "нужно", RIGHT);
+        caption(layout.captions(), BoardLayout.PRICE_RIGHT, "за стак", RIGHT);
 
         for (int row = 0; row < layout.rows(); row++) {
-            int index = row;
+            // полосы чуть ближе подложки, иначе они мерцают, деля с ней одну глубину
+            strips.add(panel(layout.row(row), layout.panelWidth() - 0.2, layout.rowHeight(), NONE, 0.03f));
             icons.add(icon(layout.icon(row)));
             names.add(text(layout.name(row), TEXT_SCALE));
             demands.add(text(layout.demand(row), TEXT_SCALE));
             prices.add(text(layout.price(row), TEXT_SCALE));
-            hitboxes.add(hitbox(layout.rowHitbox(row), layout.width(), layout.hitboxHeight(),
-                    player -> clickRow(player, index)));
         }
 
         footer = text(layout.footer(), CAPTION_SCALE);
-
-        button(layout.menuButton(), "[ МЕНЮ ]", NamedTextColor.GREEN, MENU_SCALE,
-                1.9, 0.55, content::onMenu);
-        button(layout.scrollUp(), "▲", NamedTextColor.YELLOW, ARROW_SCALE,
-                0.8, 0.45, player -> scroll(-1));
-        button(layout.scrollDown(), "▼", NamedTextColor.YELLOW, ARROW_SCALE,
-                0.8, 0.45, player -> scroll(1));
+        text(layout.menuButton(), MENU_SCALE).text(Ui.text("[ МЕНЮ ]", NamedTextColor.GREEN));
+        menu = hitbox(layout.menuButton(), 1.9, 0.55);
 
         refresh();
     }
@@ -116,9 +131,9 @@ public final class StandView {
             if (index < rows.size()) {
                 StandContent.Row row = rows.get(index);
                 icons.get(i).setItemStack(new ItemStack(row.material()));
-                names.get(i).text(nameText(i, row));
-                demands.get(i).text(Ui.text(amount(row.amount()), NamedTextColor.WHITE));
-                prices.get(i).text(Ui.text(Ui.money(row.pricePerStack()) + " ар", NamedTextColor.GOLD));
+                put(names.get(i), TEXT_SCALE, LEFT, nameOf(row), nameColor(i));
+                put(demands.get(i), TEXT_SCALE, RIGHT, amount(row.amount()), NamedTextColor.WHITE);
+                put(prices.get(i), TEXT_SCALE, RIGHT, Ui.money(row.pricePerStack()) + " ар", NamedTextColor.GOLD);
             } else {
                 icons.get(i).setItemStack(null);
                 names.get(i).text(Component.empty());
@@ -132,11 +147,12 @@ public final class StandView {
                 ? Ui.text("заказов сейчас нет", NamedTextColor.DARK_GRAY)
                 : Ui.text((offset + 1) + "–" + Math.min(rows.size(), offset + layout.rows())
                         + " из " + rows.size() + "   ·   колесо мыши", NamedTextColor.GRAY));
+        paintHover();
     }
 
-    /** Подсветка строки, на которую игрок сейчас смотрит. */
-    public void hover(Entity target) {
-        int index = target == null ? -1 : hitboxes.indexOf(target);
+    /** Подсветка строки, на которую игрок смотрит; -1 — ни на какую. */
+    public void hover(int visibleRow) {
+        int index = visibleRow >= 0 && offset + visibleRow < rows.size() ? visibleRow : -1;
         if (index == hovered) {
             return;
         }
@@ -144,6 +160,17 @@ public final class StandView {
         hovered = index;
         repaint(previous);
         repaint(hovered);
+        paintHover();
+    }
+
+    private void paintHover() {
+        for (int i = 0; i < strips.size(); i++) {
+            BlockData wanted = i == hovered ? HOVER : NONE;
+            // шлём изменение только той полосе, у которой оно правда есть
+            if (!strips.get(i).getBlock().equals(wanted)) {
+                strips.get(i).setBlock(wanted);
+            }
+        }
     }
 
     private void repaint(int visibleRow) {
@@ -152,13 +179,58 @@ public final class StandView {
         }
         int index = offset + visibleRow;
         if (index < rows.size()) {
-            names.get(visibleRow).text(nameText(visibleRow, rows.get(index)));
+            put(names.get(visibleRow), TEXT_SCALE, LEFT, nameOf(rows.get(index)), nameColor(visibleRow));
         }
     }
 
-    private Component nameText(int visibleRow, StandContent.Row row) {
-        return Ui.name(row.material()).color(
-                visibleRow == hovered ? NamedTextColor.YELLOW : NamedTextColor.WHITE);
+    private NamedTextColor nameColor(int visibleRow) {
+        return visibleRow == hovered ? NamedTextColor.YELLOW : NamedTextColor.WHITE;
+    }
+
+    /** Русское название — его же и меряем. Без ассетов — техническое имя: его ширина тоже известна. */
+    private String nameOf(StandContent.Row row) {
+        String russian = assets.get().names().get(row.material().name());
+        return russian != null ? russian
+                : row.material().name().toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+    }
+
+    // ---------- выравнивание колонок ----------
+
+    private static final int LEFT = -1;
+    private static final int RIGHT = 1;
+    /** Пиксель шрифта на текстовой надписи — 1/40 блока при масштабе 1. */
+    private static final float PIXEL = 1 / 40f;
+
+    /**
+     * Текст, прижатый к краю колонки. Игра умеет только центрировать надпись на её точке,
+     * поэтому сдвигаем её на полширины, и точка надписи становится краем колонки.
+     * Ширину считаем по шрифту игры; без него остаётся центр.
+     */
+    private void put(TextDisplay display, float scale, int edge, String text, NamedTextColor color) {
+        display.text(Ui.text(text, color));
+        int width = width(text);
+        float shift = width < 0 ? 0 : -edge * width * PIXEL * scale / 2f;
+        display.setTransformation(new Transformation(
+                new Vector3f(shift, 0, 0),
+                new AxisAngle4f(0, 0, 0, 1),
+                new Vector3f(scale, scale, scale),
+                new AxisAngle4f(0, 0, 0, 1)));
+    }
+
+    /** Ширина строки в пикселях шрифта игры; -1 — шрифт неизвестен. */
+    private int width(String text) {
+        var glyphs = assets.get().glyphs();
+        if (glyphs.isEmpty()) {
+            return -1;
+        }
+        int width = 0;
+        for (int i = 0; i < text.length(); ) {
+            int cp = text.codePointAt(i);
+            width += glyphs.getOrDefault(cp, 6);
+            i += Character.charCount(cp);
+        }
+        // у последней буквы нет промежутка после неё
+        return Math.max(0, width - 1);
     }
 
     // ---------- ввод ----------
@@ -172,25 +244,21 @@ public final class StandView {
         }
     }
 
-    /** Клик по любой сущности стенда. true, если это была наша сущность. */
+    /** Кликнули по сущности стенда. true — это была кнопка «Меню». */
     public boolean click(Player player, Entity clicked) {
-        Consumer<Player> action = actions.get(clicked.getUniqueId());
-        if (action == null) {
+        if (menu == null || !clicked.getUniqueId().equals(menu.getUniqueId())) {
             return false;
         }
-        action.accept(player);
+        content.onMenu(player);
         return true;
     }
 
-    public boolean owns(Entity entity) {
-        return actions.containsKey(entity.getUniqueId());
+    public BoardLayout layout() {
+        return layout;
     }
 
-    private void clickRow(Player player, int visibleRow) {
-        int index = offset + visibleRow;
-        if (index < rows.size()) {
-            content.onRow(player, rows.get(index));
-        }
+    public boolean owns(Entity entity) {
+        return menu != null && menu.getUniqueId().equals(entity.getUniqueId());
     }
 
     // ---------- уборка ----------
@@ -203,65 +271,85 @@ public final class StandView {
         });
         spawned.clear();
         icons.clear();
+        strips.clear();
         names.clear();
         demands.clear();
         prices.clear();
-        hitboxes.clear();
-        actions.clear();
         header = null;
         footer = null;
+        menu = null;
     }
 
     // ---------- спавн отдельных кусочков ----------
 
+    /** Значок предмета: инвентарный ракурс, развёрнут вместе с доской и сплющен в картинку. */
     private ItemDisplay icon(Location where) {
         return spawn(where, ItemDisplay.class, display -> {
             display.setItemDisplayTransform(ItemDisplay.ItemDisplayTransform.GUI);
-            display.setBillboard(Display.Billboard.CENTER);
+            display.setBillboard(Display.Billboard.FIXED);
             display.setBrightness(FULL_BRIGHT);
-            display.setTransformation(scaled(ICON_SCALE));
             display.setViewRange(VIEW_RANGE);
+            display.setTransformation(new Transformation(
+                    new Vector3f(0, 0.06f, 0),
+                    new AxisAngle4f(0, 0, 0, 1),
+                    new Vector3f(ICON_SCALE, ICON_SCALE, ICON_DEPTH),
+                    new AxisAngle4f(0, 0, 0, 1)));
         });
     }
 
     private TextDisplay text(Location where, float scale) {
         return spawn(where, TextDisplay.class, display -> {
-            display.setBillboard(Display.Billboard.CENTER);
+            display.setBillboard(Display.Billboard.FIXED);
             display.setAlignment(TextDisplay.TextAlignment.CENTER);
             display.setBackgroundColor(TRANSPARENT);
             display.setBrightness(FULL_BRIGHT);
             display.setTransformation(scaled(scale));
             display.setViewRange(VIEW_RANGE);
             display.setSeeThrough(false);
+            display.setShadowed(true);
             display.text(Component.empty());
         });
     }
 
-    private void caption(Location row, double sideOffset, String label) {
+    /**
+     * Пластина фона: блок, растянутый до width×height и сплющенный до тонкого листа.
+     * Блок рисуется от своего угла, поэтому сдвигаем его на половину ширины влево и чуть
+     * назад — за текст.
+     */
+    private BlockDisplay panel(Location bottomCenter, double width, double height, BlockData block, float behind) {
+        return spawn(bottomCenter, BlockDisplay.class, display -> {
+            display.setBlock(block);
+            display.setBrightness(FULL_BRIGHT);
+            display.setViewRange(VIEW_RANGE);
+            display.setTransformation(new Transformation(
+                    new Vector3f((float) (-width / 2), 0, -behind),
+                    new AxisAngle4f(0, 0, 0, 1),
+                    new Vector3f((float) width, (float) height, 0.01f),
+                    new AxisAngle4f(0, 0, 0, 1)));
+        });
+    }
+
+    private void caption(Location row, double sideOffset, String label, int edge) {
         Location where = row.clone().add(layout.rightward().multiply(sideOffset));
-        text(where, CAPTION_SCALE).text(Ui.text(label, NamedTextColor.DARK_GRAY));
+        put(text(where, CAPTION_SCALE), CAPTION_SCALE, edge, label, NamedTextColor.GRAY);
     }
 
-    private void button(Location where, String label, NamedTextColor color, float scale,
-                        double hitWidth, double hitHeight, Consumer<Player> action) {
-        text(where, scale).text(Ui.text(label, color));
-        hitbox(where, hitWidth, hitHeight, action);
-    }
-
-    private Interaction hitbox(Location center, double width, double height, Consumer<Player> action) {
+    private Interaction hitbox(Location center, double width, double height) {
         // Коробка Interaction растёт вверх от точки спавна — опускаем её на половину высоты.
         Location base = center.clone().add(0, -height / 2.0, 0);
-        Interaction interaction = spawn(base, Interaction.class, entity -> {
+        return spawn(base, Interaction.class, entity -> {
             entity.setInteractionWidth((float) width);
             entity.setInteractionHeight((float) height);
             entity.setResponsive(true);
         });
-        actions.put(interaction.getUniqueId(), action);
-        return interaction;
     }
 
     private <T extends Entity> T spawn(Location where, Class<T> type, Consumer<T> setup) {
-        T entity = where.getWorld().spawn(where, type, fresh -> {
+        Location facing = where.clone();
+        // Плоская доска смотрит на тех, кто стоит перед стендом.
+        facing.setYaw(layout.anchor().getYaw());
+        facing.setPitch(0f);
+        T entity = facing.getWorld().spawn(facing, type, fresh -> {
             fresh.setPersistent(false);
             fresh.setVisibleByDefault(false);
             setup.accept(fresh);

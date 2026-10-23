@@ -19,9 +19,6 @@ public interface StandContent {
 
     List<Row> rows();
 
-    /** Клик по строке списка. */
-    void onRow(Player player, Row row);
-
     /** Кнопка «Меню» рядом со стендом. */
     void onMenu(Player player);
 }
