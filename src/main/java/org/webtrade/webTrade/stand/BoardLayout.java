@@ -15,22 +15,28 @@ import org.bukkit.util.Vector;
  */
 public record BoardLayout(Location anchor, int rows, double rowHeight, double width) {
 
-    public static final int DEFAULT_ROWS = 15;
-    public static final double DEFAULT_ROW_HEIGHT = 0.30;
+    public static final int DEFAULT_ROWS = 10;
+    public static final double DEFAULT_ROW_HEIGHT = 0.27;
     public static final double DEFAULT_WIDTH = 5.0;
 
-    /** Смещения колонок от середины строки, в блоках: иконка, название, спрос, цена. */
-    private static final double ICON_X = -2.05;
-    private static final double NAME_X = -1.15;
-    private static final double DEMAND_X = 0.75;
-    private static final double PRICE_X = 1.95;
+    /**
+     * Колонки, в блоках от середины строки: центр значка, левый край названий, правые края
+     * спроса и цены — названия прижаты влево, числа вправо, как в обычной таблице.
+     */
+    static final double ICON_X = -2.15;
+    static final double NAME_LEFT = -1.85;
+    static final double DEMAND_RIGHT = 1.15;
+    static final double PRICE_RIGHT = 2.45;
 
     /** Ряды служебных подписей, в единицах высоты строки относительно нижней строки. */
     private static final double CAPTIONS_ROW = 1.0;
     private static final double HEADER_ROW = 1.9;
     private static final double FOOTER_ROW = -0.85;
     private static final double MENU_ROW = -1.75;
-    private static final double ARROW_OFFSET = 1.5;
+    /** Полоса строки начинается чуть ниже её текста: текст висит от точки вверх. */
+    private static final double ROW_STRIP_FROM = -0.55;
+    private static final double PANEL_BOTTOM = -2.6;
+    private static final double PANEL_TOP_MARGIN = 1.6;
 
     public static BoardLayout of(Location anchor, int rows) {
         return new BoardLayout(anchor.clone(), rows, DEFAULT_ROW_HEIGHT, DEFAULT_WIDTH);
@@ -77,21 +83,17 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
     }
 
     public Location name(int visibleRow) {
-        return at(NAME_X, rowLevel(visibleRow));
+        return at(NAME_LEFT, rowLevel(visibleRow));
     }
 
     public Location demand(int visibleRow) {
-        return at(DEMAND_X, rowLevel(visibleRow));
+        return at(DEMAND_RIGHT, rowLevel(visibleRow));
     }
 
     public Location price(int visibleRow) {
-        return at(PRICE_X, rowLevel(visibleRow));
+        return at(PRICE_RIGHT, rowLevel(visibleRow));
     }
 
-    /** Кликабельная полоса на всю ширину строки. */
-    public Location rowHitbox(int visibleRow) {
-        return at(0, rowLevel(visibleRow));
-    }
 
     public Location captions() {
         return at(0, rows - 1 + CAPTIONS_ROW);
@@ -109,16 +111,56 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
         return at(0, MENU_ROW);
     }
 
-    public Location scrollUp() {
-        return at(-ARROW_OFFSET, MENU_ROW);
+
+    /** Низ полосы строки (полоса подсветки висит отсюда вверх на высоту строки). */
+    public Location row(int visibleRow) {
+        return at(0, rowLevel(visibleRow) + ROW_STRIP_FROM);
     }
 
-    public Location scrollDown() {
-        return at(ARROW_OFFSET, MENU_ROW);
+    /** Низ подложки — под кнопкой «Меню»; сама подложка тянется до шапки. */
+    public Location panel() {
+        return at(0, PANEL_BOTTOM);
     }
 
-    public double hitboxHeight() {
-        return rowHeight * 0.9;
+    public double panelWidth() {
+        return width + 1.3;
+    }
+
+    public double panelHeight() {
+        return (rows - 1 + HEADER_ROW + PANEL_TOP_MARGIN - PANEL_BOTTOM) * rowHeight;
+    }
+
+    /**
+     * Куда на доске смотрит игрок: точка пересечения взгляда с плоскостью доски.
+     *
+     * @return {сдвиг вбок в блоках, высота в строках от якоря} или null, если мимо доски
+     */
+    public double[] look(Location eye, Vector direction, double maxDistance) {
+        if (eye.getWorld() == null || !eye.getWorld().equals(anchor.getWorld())) {
+            return null;
+        }
+        Vector n = normal();
+        double facing = direction.dot(n);
+        if (facing > -1e-3) {
+            return null; // смотрит вдоль доски или ей в спину
+        }
+        Vector toPlane = anchor.toVector().subtract(eye.toVector());
+        double distance = toPlane.dot(n) / facing;
+        if (distance < 0 || distance > maxDistance) {
+            return null;
+        }
+        Vector hit = eye.toVector().add(direction.clone().multiply(distance)).subtract(anchor.toVector());
+        double side = hit.dot(rightward());
+        double level = hit.getY() / rowHeight;
+        boolean inside = Math.abs(side) <= panelWidth() / 2
+                && level >= PANEL_BOTTOM && level <= PANEL_BOTTOM + panelHeight() / rowHeight;
+        return inside ? new double[]{side, level} : null;
+    }
+
+    /** Строка списка под этой высотой (в строках от якоря), или -1. */
+    public int rowAt(double level) {
+        int visibleRow = rows - 1 - (int) Math.floor(level - ROW_STRIP_FROM);
+        return visibleRow >= 0 && visibleRow < rows ? visibleRow : -1;
     }
 
     /** Игрок считается «у стенда», пока он в этом радиусе и в том же мире. */

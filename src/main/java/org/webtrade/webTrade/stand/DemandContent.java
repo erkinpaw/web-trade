@@ -44,17 +44,6 @@ public final class DemandContent implements StandContent {
     }
 
     @Override
-    public void onRow(Player player, Row row) {
-        // Стенд — витрина: по клику просто подсказываем, что с этим делать.
-        player.sendMessage(Component.text()
-                .append(Ui.name(row.material()).color(NamedTextColor.WHITE))
-                .append(Ui.text(" — нужно " + row.amount() + " шт., "
-                        + Ui.money(row.pricePerStack()) + " ар за стак. Сдать: /sell",
-                        NamedTextColor.GRAY))
-                .build());
-    }
-
-    @Override
     public void onMenu(Player player) {
         // Кнопка ведёт в общее меню: оттуда и заказать ресурсы, и внести ары, и забрать контейнер.
         screens.mainMenu(player);

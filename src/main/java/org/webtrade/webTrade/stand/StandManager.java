@@ -13,6 +13,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.plugin.Plugin;
 import org.webtrade.webTrade.ui.Ui;
 
@@ -37,7 +38,9 @@ public final class StandManager implements Listener {
     private static final double HIDE_RADIUS = 14.0;
     /** Как далеко ищем сущность, на которую смотрит игрок. */
     private static final int LOOK_DISTANCE = 8;
-    private static final long TASK_PERIOD = 10L;
+    /** Подсветку строки под взглядом обновляем часто, иначе она отстаёт от мыши. */
+    private static final int TASK_PERIOD = 4;
+    private static final long CLICK_COOLDOWN_MS = 500;
 
     private static final int DEFAULT_ROWS = BoardLayout.DEFAULT_ROWS;
 
@@ -47,6 +50,7 @@ public final class StandManager implements Listener {
 
     private final List<BoardLayout> stands = new ArrayList<>();
     private final Map<UUID, StandView> views = new HashMap<>();
+    private final Map<UUID, Long> lastClick = new HashMap<>();
 
     private int taskId = -1;
     /** Счётчик тиков: цифры на стенде обновляем реже, чем следим за подходом игроков. */
@@ -83,7 +87,7 @@ public final class StandManager implements Listener {
 
             if (view == null) {
                 if (nearby != null) {
-                    StandView fresh = new StandView(plugin, nearby, player, content);
+                    StandView fresh = new StandView(plugin, nearby, player, content, this::assets);
                     views.put(player.getUniqueId(), fresh);
                     fresh.spawn();
                 }
@@ -94,10 +98,10 @@ public final class StandManager implements Listener {
                 views.remove(player.getUniqueId());
                 continue;
             }
-            view.hover(player.getTargetEntity(LOOK_DISTANCE));
+            view.hover(lookedRow(player, view));
         }
         // Спрос меняется от чужих сделок — раз в две секунды освежаем цифры сами.
-        if (++ticks % 4 == 0) {
+        if (++ticks % (40 / TASK_PERIOD) == 0) {
             refreshAll();
         }
         // Игроки, которые вышли между тиками, могли оставить за собой сущности.
@@ -132,7 +136,10 @@ public final class StandManager implements Listener {
         StandView view = views.get(event.getPlayer().getUniqueId());
         if (view != null && view.owns(event.getRightClicked())) {
             event.setCancelled(true);
-            view.click(event.getPlayer(), event.getRightClicked());
+            // клиент шлёт нажатие за каждую руку, а зажатая ПКМ повторяет его — открываем раз в полсекунды
+            if (event.getHand() == EquipmentSlot.HAND && cooldown(event.getPlayer())) {
+                view.click(event.getPlayer(), event.getRightClicked());
+            }
         }
     }
 
@@ -144,8 +151,29 @@ public final class StandManager implements Listener {
         StandView view = views.get(player.getUniqueId());
         if (view != null && view.owns(event.getEntity())) {
             event.setCancelled(true);
-            view.click(player, event.getEntity());
+            if (cooldown(player)) {
+                view.click(player, event.getEntity());
+            }
         }
+    }
+
+    /** Русские названия и ширина шрифта — из ассетов калькулятора (пусто, пока не скачались). */
+    private org.webtrade.webTrade.assets.CalculatorAssets.Result assets() {
+        return plugin instanceof org.webtrade.webTrade.WebTrade webTrade
+                ? webTrade.calculatorAssets() : org.webtrade.webTrade.assets.CalculatorAssets.Result.empty();
+    }
+
+    /** true — можно нажимать: с прошлого нажатия прошло достаточно времени. */
+    private boolean cooldown(Player player) {
+        long now = System.currentTimeMillis();
+        Long last = lastClick.put(player.getUniqueId(), now);
+        return last == null || now - last >= CLICK_COOLDOWN_MS;
+    }
+
+    /** Строка, на которую игрок смотрит (-1 — мимо списка). Считается геометрически, без хитбоксов. */
+    private static int lookedRow(Player player, StandView view) {
+        double[] at = view.layout().look(player.getEyeLocation(), player.getEyeLocation().getDirection(), LOOK_DISTANCE);
+        return at == null ? -1 : view.layout().rowAt(at[1]);
     }
 
     /**
@@ -159,10 +187,10 @@ public final class StandManager implements Listener {
         if (view == null) {
             return;
         }
-        // Перехватываем только когда игрок смотрит на стенд, иначе рядом с ним
-        // нельзя будет просто сменить предмет в руке.
-        Entity looking = player.getTargetEntity(LOOK_DISTANCE);
-        if (looking == null || !view.owns(looking)) {
+        // Перехватываем только когда игрок смотрит на доску, иначе рядом с ней нельзя будет
+        // просто сменить предмет в руке. Смотрим на всю доску, а не в строку: промахи между
+        // строк раньше съедали щелчки колеса, и прокрутка шла рывками.
+        if (view.layout().look(player.getEyeLocation(), player.getEyeLocation().getDirection(), LOOK_DISTANCE) == null) {
             return;
         }
 
@@ -198,8 +226,9 @@ public final class StandManager implements Listener {
     /** Ставит стенд перед игроком, лицом к нему. Якорь — нижняя строка списка. */
     public void create(Player admin) {
         Location anchor = admin.getLocation().clone();
-        // Список растёт вверх от якоря, поэтому якорь ставим примерно на уровень глаз.
-        anchor.setY(anchor.getY() + 1.7);
+        // Список растёт вверх от якоря: якорь ниже глаз, чтобы доска стояла вокруг взгляда,
+        // а не уходила вверх — иначе вблизи приходится задирать голову и всё заваливается.
+        anchor.setY(anchor.getY() + 0.9);
         anchor.setYaw(admin.getLocation().getYaw() + 180f);
         anchor.setPitch(0f);
         // Отодвигаем вперёд, чтобы стенд не оказался внутри игрока.
