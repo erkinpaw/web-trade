@@ -334,6 +334,11 @@
       `background-size:${ICONS.cols * 100}% ${ICONS.rows * 100}%;` +
       `background-position:${col / (ICONS.cols - 1) * 100}% ${y}%"></span>`;
   }
+  /** 1 вид, 2 вида, 5 видов */
+  const plural = (n, one, few, many) => {
+    const t = n % 100, u = n % 10;
+    return t >= 11 && t <= 14 ? many : u === 1 ? one : u >= 2 && u <= 4 ? few : many;
+  };
   const nameOf = id => byId.has(id) ? byId.get(id).name : id;
 
   // ======================= каталог =======================
@@ -757,7 +762,7 @@
     if (foreign.size) {
       const top = [...foreign].sort((a, b) => b[1] - a[1]).slice(0, 4)
         .map(([id, n]) => `${id} × ${grouped(n)}`).join(", ");
-      notes.push(`Не торгуются и пропущены: ${foreign.size} видов (${top}${foreign.size > 4 ? ", …" : ""}).`);
+      notes.push(`Не торгуются и пропущены: ${foreign.size} ${plural(foreign.size, "вид", "вида", "видов")} (${top}${foreign.size > 4 ? ", …" : ""}).`);
     }
     if (parsed.unknown) notes.push(`Не опознано блоков: ${grouped(parsed.unknown)}.`);
     for (const text of notes) {
