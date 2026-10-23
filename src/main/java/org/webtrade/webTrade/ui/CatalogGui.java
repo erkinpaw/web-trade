@@ -72,8 +72,10 @@ public final class CatalogGui extends PagedGui {
         if (filter.isEmpty()) {
             return true;
         }
-        // Русское название живёт на клиенте, на сервере его нет — ищем по имени материала.
-        return material.name().toLowerCase(Locale.ROOT).contains(filter);
+        // По имени материала (stone) и по-русски (камень), если названия скачались для калькулятора.
+        String russian = screens.russianName(material);
+        return material.name().toLowerCase(Locale.ROOT).contains(filter)
+                || (russian != null && russian.toLowerCase(Locale.ROOT).contains(filter));
     }
 
     private org.bukkit.inventory.ItemStack iconFor(ResourceType type) {
@@ -83,16 +85,17 @@ public final class CatalogGui extends PagedGui {
                 Ui.text("Цена за штуку: " + Ui.money(type.pricePerUnit()) + " ар")));
         if (inCart > 0) {
             lore.add(Component.empty());
-            lore.add(Ui.text("В контейнере: " + inCart + " шт.", NamedTextColor.GREEN));
+            lore.add(Ui.amount("В контейнере: ", inCart, NamedTextColor.GREEN));
             lore.add(Ui.text("На сумму: " + Ui.money(type.pricePerUnit() * inCart) + " ар",
                     NamedTextColor.GREEN));
         }
         lore.add(Component.empty());
-        lore.add(Ui.text("ЛКМ — указать количество", NamedTextColor.YELLOW));
+        lore.add(Ui.hint("ЛКМ", "указать количество"));
         if (inCart > 0) {
-            lore.add(Ui.text("ПКМ — убрать из контейнера", NamedTextColor.YELLOW));
+            lore.add(Ui.hint("ПКМ", "убрать из контейнера"));
         }
-        return Ui.icon(type.material(), Math.max(1, Math.min(inCart, 64)), Ui.name(type.material()), lore);
+        var icon = Ui.icon(type.material(), Math.max(1, Math.min(inCart, 64)), Ui.name(type.material()), lore);
+        return inCart > 0 ? Ui.glint(icon) : icon;
     }
 
     @Override
@@ -113,7 +116,8 @@ public final class CatalogGui extends PagedGui {
                                 Ui.text("Нажмите, чтобы задать запрос.", NamedTextColor.YELLOW))),
                         (player, click) -> screens.searchDialog(player, this)),
                 SLOT_CART, new Entry(
-                        Ui.icon(Material.CHEST, Ui.text("Контейнер", NamedTextColor.GREEN), cartLore),
+                        cart.isEmpty() ? Ui.icon(Material.CHEST, Ui.text("Контейнер", NamedTextColor.GREEN), cartLore)
+                                : Ui.glint(Ui.icon(Material.CHEST, Ui.text("Контейнер", NamedTextColor.GREEN), cartLore)),
                         (player, click) -> {
                             if (cart.isEmpty()) {
                                 player.sendMessage(Ui.text("Сначала выберите хотя бы один ресурс.",

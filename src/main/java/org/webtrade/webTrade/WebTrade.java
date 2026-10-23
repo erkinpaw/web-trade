@@ -5,8 +5,10 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.webtrade.webTrade.account.AccountManager;
+import org.webtrade.webTrade.assets.CalculatorAssets;
 import org.webtrade.webTrade.account.JoinListener;
 import org.webtrade.webTrade.command.CalculatorCommand;
+import org.webtrade.webTrade.command.RemoteAccess;
 import org.webtrade.webTrade.command.ScreenCommand;
 import org.webtrade.webTrade.command.WithdrawCommand;
 import org.webtrade.webTrade.currency.CurrencyListener;
@@ -28,6 +30,7 @@ import org.webtrade.webTrade.ui.StockGui;
 import org.webtrade.webTrade.ui.Ui;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Objects;
 
 public final class WebTrade extends JavaPlugin {
@@ -41,6 +44,7 @@ public final class WebTrade extends JavaPlugin {
     private MarketManager market;
     private Screens screens;
     private StandManager stands;
+    private volatile CalculatorAssets.Result calculatorAssets = CalculatorAssets.Result.empty();
 
     @Override
     public void onEnable() {
@@ -82,15 +86,16 @@ public final class WebTrade extends JavaPlugin {
         pm.registerEvents(stands, this);
         stands.start();
 
-        command("trade", new ScreenCommand(screens::mainMenu));
-        command("balance", new ScreenCommand(screens::mainMenu));
-        command("deposit", new ScreenCommand(DepositGui::open));
-        command("withdraw", new WithdrawCommand(currency, screens));
-        command("container", new ScreenCommand(screens::containers));
-        command("sell", new ScreenCommand(SellGui::open));
+        // Экраны биржи командой «откуда угодно» — только с правом webtrade.command (см. RemoteAccess).
+        remote("trade", new ScreenCommand(screens::mainMenu));
+        remote("balance", new ScreenCommand(screens::mainMenu));
+        remote("deposit", new ScreenCommand(DepositGui::open));
+        remote("withdraw", new WithdrawCommand(currency, screens));
+        remote("container", new ScreenCommand(screens::containers));
+        remote("sell", new ScreenCommand(SellGui::open));
         // Спрос и склад в меню не выведены — они нужны реже, а меню должно оставаться коротким.
-        command("demand", new ScreenCommand(player -> new DemandGui(screens).open(player)));
-        command("stock", new ScreenCommand(player ->
+        remote("demand", new ScreenCommand(player -> new DemandGui(screens).open(player)));
+        remote("stock", new ScreenCommand(player ->
                 new StockGui(screens, player.getUniqueId()).open(player)));
         command("tradestand", new StandCommand(stands));
         command("tradecalc", new CalculatorCommand(this, resources));
@@ -137,12 +142,41 @@ public final class WebTrade extends JavaPlugin {
         if (!enabled) {
             return;
         }
+        LegacyBlocks legacy = new LegacyBlocks(getLogger());
+        List<String> ids = resources.all().stream().map(type -> type.material().name()).toList();
+        String version = getServer().getMinecraftVersion();
+        CalculatorAssets assets = new CalculatorAssets(getDataFolder().toPath(), getLogger());
+        calculatorAssets = assets.cached(version, ids);
+        writeCalculator(legacy);
+        // Значков ещё нет — качаем и рисуем в фоне, потом выгружаем страницу ещё раз.
+        if (!calculatorAssets.hasIcons() && getConfig().getBoolean("calculator.icons", true)) {
+            getServer().getScheduler().runTaskAsynchronously(this, () -> {
+                CalculatorAssets.Result fresh = assets.prepare(version, ids);
+                if (fresh.hasIcons() || !fresh.names().isEmpty()) {
+                    calculatorAssets = fresh;
+                    writeCalculator(legacy);
+                }
+            });
+        }
+    }
+
+    /** Пишет calculator.html с тем, что сейчас известно о названиях и значках. */
+    public void writeCalculator(LegacyBlocks legacy) {
         try {
-            var file = CalculatorExport.write(this, resources, new LegacyBlocks(getLogger()));
-            getLogger().info("Калькулятор выгружен: " + file.getFileName());
+            var file = CalculatorExport.write(this, resources, legacy, calculatorAssets);
+            getLogger().info("Калькулятор выгружен: " + file.getFileName()
+                    + (calculatorAssets.hasIcons() ? " (со значками)" : ""));
         } catch (IOException e) {
             getLogger().warning("Не удалось выгрузить калькулятор: " + e.getMessage());
         }
+    }
+
+    public CalculatorAssets.Result calculatorAssets() {
+        return calculatorAssets;
+    }
+
+    private void remote(String name, org.bukkit.command.CommandExecutor executor) {
+        command(name, new RemoteAccess(this, executor));
     }
 
     private void command(String name, org.bukkit.command.CommandExecutor executor) {

@@ -1,6 +1,7 @@
 package org.webtrade.webTrade.resource;
 
 import org.bukkit.plugin.Plugin;
+import org.webtrade.webTrade.assets.CalculatorAssets;
 import org.webtrade.webTrade.schematic.LegacyBlocks;
 
 import java.io.IOException;
@@ -26,6 +27,7 @@ public final class CalculatorExport {
     private static final String CATALOG_PLACEHOLDER = "__CATALOG_JSON__";
     private static final String LEGACY_PLACEHOLDER = "__LEGACY_JSON__";
     private static final String STAMP_PLACEHOLDER = "__STAMP__";
+    private static final String ICONS_PLACEHOLDER = "__ICONS_JSON__";
 
     private static final int MAX_ID = 256;
     private static final int MAX_DATA = 16;
@@ -36,13 +38,15 @@ public final class CalculatorExport {
     /**
      * @return путь к записанному файлу
      */
-    public static Path write(Plugin plugin, ResourceRegistry resources, LegacyBlocks legacy)
-            throws IOException {
+    public static Path write(Plugin plugin, ResourceRegistry resources, LegacyBlocks legacy,
+                             CalculatorAssets.Result assets) throws IOException {
         String template = readTemplate(plugin);
+        String stamp = LocalDate.now().toString();
         String page = template
-                .replace(CATALOG_PLACEHOLDER, catalogJson(resources))
+                .replace(CATALOG_PLACEHOLDER, catalogJson(resources, assets))
                 .replace(LEGACY_PLACEHOLDER, legacyJson(legacy))
-                .replace(STAMP_PLACEHOLDER, LocalDate.now().toString());
+                .replace(ICONS_PLACEHOLDER, iconsJson(assets))
+                .replace(STAMP_PLACEHOLDER, stamp);
 
         Path target = plugin.getDataFolder().toPath().resolve("calculator.html");
         Files.writeString(target, page, StandardCharsets.UTF_8);
@@ -58,14 +62,32 @@ public final class CalculatorExport {
         }
     }
 
-    private static String catalogJson(ResourceRegistry resources) {
+    /** name — по-русски, если названия скачались; en — техническое, чтобы искать можно было и так. */
+    private static String catalogJson(ResourceRegistry resources, CalculatorAssets.Result assets) {
         StringJoiner json = new StringJoiner(",\n", "[\n", "\n]");
         for (ResourceType type : resources.all()) {
             String id = type.material().name();
-            json.add("{\"id\":\"" + id + "\",\"name\":\"" + readable(id)
-                    + "\",\"price\":" + String.format(Locale.US, "%.4f", type.pricePerStack()) + "}");
+            String name = assets.names().getOrDefault(id, readable(id));
+            Integer icon = assets.icons().get(id);
+            json.add("{\"id\":\"" + id + "\",\"name\":\"" + escape(name) + "\",\"en\":\"" + readable(id)
+                    + "\",\"price\":" + String.format(Locale.US, "%.4f", type.pricePerStack())
+                    + (icon != null ? ",\"icon\":" + icon : "") + "}");
         }
         return json.toString();
+    }
+
+    /** Где лежит атлас значков; null — значков нет, страница рисует строки без них. */
+    private static String iconsJson(CalculatorAssets.Result assets) {
+        if (!assets.hasIcons()) {
+            return "null";
+        }
+        return "{\"file\":\"" + CalculatorAssets.ATLAS_FILE + "?v=" + assets.icons().size()
+                + "\",\"size\":" + assets.size() + ",\"cols\":" + assets.columns()
+                + ",\"rows\":" + (assets.icons().size() + assets.columns() - 1) / assets.columns() + "}";
+    }
+
+    private static String escape(String text) {
+        return text.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     /**

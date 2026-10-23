@@ -84,6 +84,12 @@ public final class Screens {
         return resources;
     }
 
+    /** Русское название из ассетов калькулятора; null — их ещё не скачали (тогда ищем по STONE и т.п.). */
+    public String russianName(org.bukkit.Material material) {
+        return plugin instanceof org.webtrade.webTrade.WebTrade webTrade
+                ? webTrade.calculatorAssets().names().get(material.name()) : null;
+    }
+
     public Cart cartOf(Player player) {
         return carts.computeIfAbsent(player.getUniqueId(), uuid -> new Cart());
     }
@@ -302,7 +308,7 @@ public final class Screens {
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Поиск ресурса", NamedTextColor.AQUA))
                         .body(List.of(DialogBody.plainMessage(Ui.text(
-                                "Часть имени материала, например STONE или oak."))))
+                                "Часть названия: камень, доски, STONE или oak."))))
                         .inputs(List.of(DialogInput.text("query", Ui.text("Запрос", NamedTextColor.WHITE))
                                 .initial(catalog.filterText())
                                 .maxLength(48)
