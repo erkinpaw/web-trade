@@ -2,7 +2,7 @@ name: WebTrade
 version: '${version}'
 
 main: org.webtrade.webTrade.WebTrade
-api-version: '26.2'
+api-version: '26.3'
 load: POSTWORLD
 
 commands:
@@ -41,6 +41,10 @@ commands:
     aliases: [stand]
     usage: /tradestand create|remove|list
     permission: webtrade.admin
+  tradeopen:
+    description: Открыть игроку экран биржи
+    usage: /tradeopen <ник> <menu|create|containers|deposit|withdraw|sell|demand|stock>
+    permission: webtrade.admin
   tradecalc:
     description: Выгрузить страницу калькулятора с текущими ценами
     usage: /tradecalc
@@ -54,5 +58,5 @@ permissions:
     description: Доступ к своему складу
     default: true
   webtrade.admin:
-    description: Управление стендами и выгрузка калькулятора
+    description: Управление стендами, выгрузка калькулятора и открытие экранов игрокам
     default: op

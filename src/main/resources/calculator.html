@@ -207,7 +207,7 @@
       <p class="eyebrow">WebTrade · биржа ресурсов</p>
       <h1>Калькулятор контейнера</h1>
       <p class="lede">Наберите нужные ресурсы или загрузите схематику, скопируйте список
-        и вставьте его в игре: <b>Меню → Вставить список</b>.</p>
+        и вставьте его в игре: <b>/trade → Создать контейнер</b>.</p>
     </div>
     <dl class="meta">
       <div><dt>Ресурсов</dt><dd id="catalogSize">—</dd></div>
@@ -409,7 +409,7 @@
     try {
       await navigator.clipboard.writeText(out.value);
       noteEl.classList.add("done");
-      noteEl.textContent = "Скопировано. В игре: Меню → Вставить список.";
+      noteEl.textContent = "Скопировано. В игре: /trade → Создать контейнер.";
     } catch {
       out.select();
       noteEl.classList.remove("done");

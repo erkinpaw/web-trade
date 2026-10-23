@@ -20,10 +20,15 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
     public static final double DEFAULT_WIDTH = 5.0;
 
     /** Смещения колонок от середины строки, в блоках: иконка, название, спрос, цена. */
-    private static final double ICON_X = -2.05;
-    private static final double NAME_X = -1.15;
-    private static final double DEMAND_X = 0.75;
-    private static final double PRICE_X = 1.95;
+    /*
+     * Название центрируется по своей точке (выровнять влево нельзя: ширину русского
+     * названия знает только клиент), поэтому колонка стоит посередине между иконкой
+     * и числами — так даже самое длинное название, около двух блоков, не задевает соседей.
+     */
+    public static final double ICON_X = -2.15;
+    public static final double NAME_X = -0.85;
+    public static final double DEMAND_X = 0.85;
+    public static final double PRICE_X = 1.95;
 
     /** Ряды служебных подписей, в единицах высоты строки относительно нижней строки. */
     private static final double CAPTIONS_ROW = 1.0;
@@ -115,6 +120,74 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
 
     public Location scrollDown() {
         return at(ARROW_OFFSET, MENU_ROW);
+    }
+
+    /** Поля подложки вокруг содержимого, в блоках. */
+    private static final double PANEL_MARGIN_SIDE = 0.25;
+    private static final double PANEL_MARGIN_TOP = 0.35;
+    private static final double PANEL_MARGIN_BOTTOM = 0.3;
+    /** Подложку чуть отодвигаем за надписи, иначе они мерцают, сливаясь с ней. */
+    private static final double PANEL_DEPTH = 0.12;
+
+    /** Нижний край подложки в строках от якоря — под кнопкой «Меню». */
+    private double panelBottomRow() {
+        return MENU_ROW - PANEL_MARGIN_BOTTOM / rowHeight;
+    }
+
+    /** Верхний край — над заголовком. */
+    private double panelTopRow() {
+        return rows - 1 + HEADER_ROW + PANEL_MARGIN_TOP / rowHeight;
+    }
+
+    public double panelWidth() {
+        return width + PANEL_MARGIN_SIDE * 2;
+    }
+
+    public double panelHeight() {
+        return (panelTopRow() - panelBottomRow()) * rowHeight;
+    }
+
+    /** Середина подложки, лицом к зрителю — так же, как развёрнут сам стенд. */
+    public Location panelCenter() {
+        Location center = at(0, (panelTopRow() + panelBottomRow()) / 2.0)
+                .subtract(normal().multiply(PANEL_DEPTH));
+        center.setYaw(anchor.getYaw());
+        center.setPitch(0f);
+        return center;
+    }
+
+    /** Точка на плоскости стенда: сдвиг вбок в блоках и высота в строках от якоря. */
+    public record Gaze(double side, double heightRow) {
+    }
+
+    /**
+     * Куда на плоскости стенда приходится взгляд, или null, если игрок смотрит мимо неё.
+     * <p>
+     * По сущности, в которую упёрся взгляд, строку определять нельзя: коробка
+     * {@code Interaction} не поворачивается и всегда квадратная в плане, так что полоса
+     * шириной во весь стенд торчит на половину ширины к зрителю. Взгляд снизу вверх
+     * упирается в её переднюю грань и попадает на несколько строк ниже, чем видно глазу.
+     */
+    public Gaze gaze(Location eye) {
+        Vector direction = eye.getDirection();
+        Vector normal = normal();
+        double facing = direction.dot(normal);
+        // Смотрит вдоль плоскости или на обратную сторону — попадания нет.
+        if (facing > -1e-6) {
+            return null;
+        }
+        double distance = anchor.toVector().subtract(eye.toVector()).dot(normal) / facing;
+        if (distance < 0) {
+            return null;
+        }
+        Vector relative = eye.toVector().add(direction.multiply(distance)).subtract(anchor.toVector());
+        return new Gaze(relative.dot(rightward()), relative.getY() / rowHeight);
+    }
+
+    /** Та же система координат для готовой точки — чтобы описать в ней кнопку. */
+    public Gaze project(Location point) {
+        Vector relative = point.toVector().subtract(anchor.toVector());
+        return new Gaze(relative.dot(rightward()), relative.getY() / rowHeight);
     }
 
     public double hitboxHeight() {

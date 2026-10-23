@@ -20,7 +20,7 @@ import java.util.Map;
 
 /**
  * Сдача ресурсов: по галочке или при закрытии окна торгуемое уходит на биржу,
- * остальное возвращается игроку.
+ * остальное возвращается игроку. По отмене возвращается всё.
  */
 public final class SellListener implements Listener {
 
@@ -37,7 +37,7 @@ public final class SellListener implements Listener {
     /** Нижний ряд — интерфейс, класть туда ничего нельзя. */
     @EventHandler
     public void onClick(InventoryClickEvent event) {
-        if (!(event.getInventory().getHolder() instanceof SellGui.Holder)) {
+        if (!(event.getInventory().getHolder() instanceof SellGui.Holder holder)) {
             return;
         }
         // Нумерация слотов сквозная: 0..SIZE-1 — окно, дальше идёт инвентарь игрока.
@@ -47,10 +47,16 @@ public final class SellListener implements Listener {
             return;
         }
         event.setCancelled(true);
-        if (slot == SellGui.CONFIRM_SLOT && event.getWhoClicked() instanceof Player player) {
-            // Закрывать инвентарь прямо в обработчике клика нельзя — расчёт будет на закрытии.
-            plugin.getServer().getScheduler().runTask(plugin, () -> player.closeInventory());
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
         }
+        if (slot == SellGui.CANCEL_SLOT) {
+            holder.cancel();
+        } else if (slot != SellGui.CONFIRM_SLOT) {
+            return;
+        }
+        // Закрывать инвентарь прямо в обработчике клика нельзя — расчёт будет на закрытии.
+        plugin.getServer().getScheduler().runTask(plugin, () -> player.closeInventory());
     }
 
     @EventHandler
@@ -67,13 +73,24 @@ public final class SellListener implements Listener {
 
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
-        if (!(event.getInventory().getHolder() instanceof SellGui.Holder)) {
+        if (!(event.getInventory().getHolder() instanceof SellGui.Holder holder)) {
             return;
         }
         if (!(event.getPlayer() instanceof Player player)) {
             return;
         }
         Inventory inventory = event.getInventory();
+
+        if (holder.isCancelled()) {
+            for (int slot = 0; slot < SellGui.FREE_SLOTS; slot++) {
+                ItemStack stack = inventory.getItem(slot);
+                if (stack != null) {
+                    returnToPlayer(player, stack);
+                    inventory.setItem(slot, null);
+                }
+            }
+            return;
+        }
 
         // Сначала собираем всё содержимое, чтобы одинаковые предметы сдать одной сделкой.
         Map<Material, Integer> offered = new LinkedHashMap<>();

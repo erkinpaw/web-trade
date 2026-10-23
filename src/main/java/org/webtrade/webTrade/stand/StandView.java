@@ -18,9 +18,9 @@ import org.joml.Vector3f;
 import org.webtrade.webTrade.ui.Ui;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -34,12 +34,25 @@ import java.util.function.Consumer;
  */
 public final class StandView {
 
-    /** Фона нет: надписи висят прямо в воздухе. */
+    /** У самих надписей фона нет — общий фон даёт подложка за всем стендом. */
     private static final Color TRANSPARENT = Color.fromARGB(0, 0, 0, 0);
+    /** Подложка: тёмная и слегка прозрачная, чтобы стенд читался на любом фоне. */
+    private static final Color PANEL_COLOR = Color.fromARGB(200, 14, 16, 22);
+
+    /*
+     * Размеры текста в блоках при масштабе 1. Клиент рисует пиксель шрифта в 1/40 блока,
+     * строка — 9 пикселей плюс 1 на интервал, фон шире текста на пиксель.
+     * Пробел шириной 4 пикселя даёт фон 5×10 пикселей — из него и тянем подложку.
+     */
+    private static final double PIXEL = 0.025;
+    private static final double LINE_HEIGHT = 10 * PIXEL;
+    private static final double SPACE_BACKGROUND_WIDTH = 5 * PIXEL;
+    /** Фон пробела смещён вправо на полпикселя относительно точки сущности. */
+    private static final double SPACE_BACKGROUND_SHIFT = 0.5 * PIXEL;
 
     private static final float ICON_SCALE = 0.26f;
-    private static final float TEXT_SCALE = 0.40f;
-    private static final float CAPTION_SCALE = 0.35f;
+    private static final float TEXT_SCALE = 0.42f;
+    private static final float CAPTION_SCALE = 0.38f;
     private static final float HEADER_SCALE = 0.70f;
     private static final float MENU_SCALE = 0.85f;
     private static final float ARROW_SCALE = 0.65f;
@@ -58,9 +71,23 @@ public final class StandView {
     private final List<TextDisplay> names = new ArrayList<>();
     private final List<TextDisplay> demands = new ArrayList<>();
     private final List<TextDisplay> prices = new ArrayList<>();
-    private final List<Interaction> hitboxes = new ArrayList<>();
-    /** Что делать по клику: ключ — UUID Interaction-сущности. */
-    private final Map<UUID, Consumer<Player>> actions = new HashMap<>();
+    /** Наши Interaction-сущности: по ним понимаем, что игрок целится в стенд. */
+    private final Set<UUID> hitboxes = new HashSet<>();
+    /**
+     * Кликабельные области в плоскости стенда. Что именно под прицелом, решаем по ним,
+     * а не по сущности, — см. {@link BoardLayout#gaze}.
+     */
+    private final List<Region> regions = new ArrayList<>();
+
+    /** Прямоугольник на стенде: центр, полуразмеры и что делать по клику. row — строка списка или -1. */
+    private record Region(double side, double heightRow, double halfWidth, double halfHeightRows,
+                          int row, Consumer<Player> action) {
+
+        boolean contains(BoardLayout.Gaze gaze) {
+            return Math.abs(gaze.side() - side) <= halfWidth
+                    && Math.abs(gaze.heightRow() - heightRow) <= halfHeightRows;
+        }
+    }
 
     private TextDisplay header;
     private TextDisplay footer;
@@ -79,10 +106,11 @@ public final class StandView {
     // ---------- сборка ----------
 
     public void spawn() {
+        panel();
         header = text(layout.header(), HEADER_SCALE);
-        caption(layout.captions(), -1.15, "ресурс");
-        caption(layout.captions(), 0.75, "нужно");
-        caption(layout.captions(), 1.95, "за стак");
+        caption(layout.captions(), BoardLayout.NAME_X, "ресурс");
+        caption(layout.captions(), BoardLayout.DEMAND_X, "нужно");
+        caption(layout.captions(), BoardLayout.PRICE_X, "за стак");
 
         for (int row = 0; row < layout.rows(); row++) {
             int index = row;
@@ -90,8 +118,8 @@ public final class StandView {
             names.add(text(layout.name(row), TEXT_SCALE));
             demands.add(text(layout.demand(row), TEXT_SCALE));
             prices.add(text(layout.price(row), TEXT_SCALE));
-            hitboxes.add(hitbox(layout.rowHitbox(row), layout.width(), layout.hitboxHeight(),
-                    player -> clickRow(player, index)));
+            hitbox(layout.rowHitbox(row), layout.width(), layout.hitboxHeight(), index,
+                    player -> clickRow(player, index));
         }
 
         footer = text(layout.footer(), CAPTION_SCALE);
@@ -129,14 +157,15 @@ public final class StandView {
 
         header.text(Ui.text(content.title(), NamedTextColor.GOLD));
         footer.text(rows.isEmpty()
-                ? Ui.text("заказов сейчас нет", NamedTextColor.DARK_GRAY)
+                ? Ui.text("заказов сейчас нет", NamedTextColor.GRAY)
                 : Ui.text((offset + 1) + "–" + Math.min(rows.size(), offset + layout.rows())
                         + " из " + rows.size() + "   ·   колесо мыши", NamedTextColor.GRAY));
     }
 
     /** Подсветка строки, на которую игрок сейчас смотрит. */
     public void hover(Entity target) {
-        int index = target == null ? -1 : hitboxes.indexOf(target);
+        Region region = target != null && owns(target) ? regionUnderGaze() : null;
+        int index = region == null ? -1 : region.row();
         if (index == hovered) {
             return;
         }
@@ -174,16 +203,31 @@ public final class StandView {
 
     /** Клик по любой сущности стенда. true, если это была наша сущность. */
     public boolean click(Player player, Entity clicked) {
-        Consumer<Player> action = actions.get(clicked.getUniqueId());
-        if (action == null) {
+        if (!owns(clicked)) {
             return false;
         }
-        action.accept(player);
+        Region region = regionUnderGaze();
+        if (region != null) {
+            region.action().accept(player);
+        }
         return true;
     }
 
     public boolean owns(Entity entity) {
-        return actions.containsKey(entity.getUniqueId());
+        return hitboxes.contains(entity.getUniqueId());
+    }
+
+    private Region regionUnderGaze() {
+        BoardLayout.Gaze gaze = layout.gaze(viewer.getEyeLocation());
+        if (gaze == null) {
+            return null;
+        }
+        for (Region region : regions) {
+            if (region.contains(gaze)) {
+                return region;
+            }
+        }
+        return null;
     }
 
     private void clickRow(Player player, int visibleRow) {
@@ -207,7 +251,7 @@ public final class StandView {
         demands.clear();
         prices.clear();
         hitboxes.clear();
-        actions.clear();
+        regions.clear();
         header = null;
         footer = null;
     }
@@ -226,11 +270,21 @@ public final class StandView {
 
     private TextDisplay text(Location where, float scale) {
         return spawn(where, TextDisplay.class, display -> {
-            display.setBillboard(Display.Billboard.CENTER);
+            // Надписи развёрнуты жёстко, как и подложка: поворачиваясь за игроком,
+            // длинное название сбоку наполовину уходило за неё.
+            display.setBillboard(Display.Billboard.FIXED);
             display.setAlignment(TextDisplay.TextAlignment.CENTER);
             display.setBackgroundColor(TRANSPARENT);
+            // Тень делает пиксельный шрифт заметно чётче на тёмной подложке.
+            display.setShadowed(true);
             display.setBrightness(FULL_BRIGHT);
-            display.setTransformation(scaled(scale));
+            // Клиент рисует текст вверх от точки сущности, а иконку — по центру.
+            // Опускаем текст на полстроки, чтобы название стояло вровень с иконкой.
+            display.setTransformation(new Transformation(
+                    new Vector3f(0, (float) (-LINE_HEIGHT * scale / 2.0), 0),
+                    new AxisAngle4f(0, 0, 0, 1),
+                    new Vector3f(scale, scale, scale),
+                    new AxisAngle4f(0, 0, 0, 1)));
             display.setViewRange(VIEW_RANGE);
             display.setSeeThrough(false);
             display.text(Component.empty());
@@ -239,16 +293,40 @@ public final class StandView {
 
     private void caption(Location row, double sideOffset, String label) {
         Location where = row.clone().add(layout.rightward().multiply(sideOffset));
-        text(where, CAPTION_SCALE).text(Ui.text(label, NamedTextColor.DARK_GRAY));
+        text(where, CAPTION_SCALE).text(Ui.text(label, NamedTextColor.GRAY));
     }
 
     private void button(Location where, String label, NamedTextColor color, float scale,
                         double hitWidth, double hitHeight, Consumer<Player> action) {
         text(where, scale).text(Ui.text(label, color));
-        hitbox(where, hitWidth, hitHeight, action);
+        hitbox(where, hitWidth, hitHeight, -1, action);
     }
 
-    private Interaction hitbox(Location center, double width, double height, Consumer<Player> action) {
+    /**
+     * Сплошная подложка под всем стендом: один текстовый дисплей с пробелом,
+     * фон которого растянут масштабом до размеров стенда. Развёрнут жёстко, лицом
+     * к зрителям, — в отличие от надписей, которые поворачиваются за игроком.
+     */
+    private void panel() {
+        double scaleX = layout.panelWidth() / SPACE_BACKGROUND_WIDTH;
+        double scaleY = layout.panelHeight() / LINE_HEIGHT;
+        spawn(layout.panelCenter(), TextDisplay.class, display -> {
+            display.setBillboard(Display.Billboard.FIXED);
+            display.text(Component.text(" "));
+            display.setBackgroundColor(PANEL_COLOR);
+            display.setBrightness(FULL_BRIGHT);
+            display.setViewRange(VIEW_RANGE);
+            // Фон растёт вверх от точки сущности — опускаем его на половину высоты.
+            display.setTransformation(new Transformation(
+                    new Vector3f((float) (-SPACE_BACKGROUND_SHIFT * scaleX),
+                            (float) (-layout.panelHeight() / 2.0), 0),
+                    new AxisAngle4f(0, 0, 0, 1),
+                    new Vector3f((float) scaleX, (float) scaleY, 1f),
+                    new AxisAngle4f(0, 0, 0, 1)));
+        });
+    }
+
+    private void hitbox(Location center, double width, double height, int row, Consumer<Player> action) {
         // Коробка Interaction растёт вверх от точки спавна — опускаем её на половину высоты.
         Location base = center.clone().add(0, -height / 2.0, 0);
         Interaction interaction = spawn(base, Interaction.class, entity -> {
@@ -256,8 +334,10 @@ public final class StandView {
             entity.setInteractionHeight((float) height);
             entity.setResponsive(true);
         });
-        actions.put(interaction.getUniqueId(), action);
-        return interaction;
+        hitboxes.add(interaction.getUniqueId());
+        BoardLayout.Gaze at = layout.project(center);
+        regions.add(new Region(at.side(), at.heightRow(), width / 2.0,
+                height / 2.0 / layout.rowHeight(), row, action));
     }
 
     private <T extends Entity> T spawn(Location where, Class<T> type, Consumer<T> setup) {
