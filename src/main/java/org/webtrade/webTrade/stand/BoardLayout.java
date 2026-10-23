@@ -34,7 +34,7 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
     private static final double FOOTER_ROW = -0.85;
     private static final double MENU_ROW = -1.75;
     /** Полоса строки начинается чуть ниже её текста: текст висит от точки вверх. */
-    private static final double ROW_STRIP_FROM = -0.55;
+    private static final double ROW_STRIP_FROM = -0.5;
     private static final double PANEL_BOTTOM = -2.6;
     private static final double PANEL_TOP_MARGIN = 1.6;
 

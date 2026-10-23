@@ -44,11 +44,11 @@ public final class StandView {
 
     private static final Color TRANSPARENT = Color.fromARGB(0, 0, 0, 0);
     /**
-     * Подложка (чёрный бетон) и подсветка (жёлтое стекло) — тонкие пластины (block display). У них точная
+     * Подложка (чёрный бетон) и подсветка (серый бетон: у стекла видны прожилки текстуры) — тонкие пластины (block display). У них точная
      * геометрия: фон текста растягивался бы со шрифтовыми отступами и съезжал вбок.
      */
     private static final BlockData PANEL = Material.BLACK_CONCRETE.createBlockData();
-    private static final BlockData HOVER = Material.YELLOW_STAINED_GLASS.createBlockData();
+    private static final BlockData HOVER = Material.GRAY_CONCRETE.createBlockData();
     private static final BlockData NONE = Material.AIR.createBlockData();
 
     private static final float ICON_SCALE = 0.26f;
@@ -200,6 +200,8 @@ public final class StandView {
     private static final int RIGHT = 1;
     /** Пиксель шрифта на текстовой надписи — 1/40 блока при масштабе 1. */
     private static final float PIXEL = 1 / 40f;
+    /** Середина букв от низа надписи, в пикселях шрифта: строка 9 px, буквы на 1..8. */
+    private static final float GLYPH_MIDDLE = 4.5f;
 
     /**
      * Текст, прижатый к краю колонки. Игра умеет только центрировать надпись на её точке,
@@ -211,7 +213,9 @@ public final class StandView {
         int width = width(text);
         float shift = width < 0 ? 0 : -edge * width * PIXEL * scale / 2f;
         display.setTransformation(new Transformation(
-                new Vector3f(shift, 0, 0),
+                // надпись висит от точки вверх — опускаем на полвысоты строки шрифта, чтобы её
+                // середина легла ровно на линию строки (там же центр значка и полосы подсветки)
+                new Vector3f(shift, -GLYPH_MIDDLE * PIXEL * scale, 0),
                 new AxisAngle4f(0, 0, 0, 1),
                 new Vector3f(scale, scale, scale),
                 new AxisAngle4f(0, 0, 0, 1)));
@@ -290,7 +294,7 @@ public final class StandView {
             display.setBrightness(FULL_BRIGHT);
             display.setViewRange(VIEW_RANGE);
             display.setTransformation(new Transformation(
-                    new Vector3f(0, 0.06f, 0),
+                    new Vector3f(0, 0, 0),
                     new AxisAngle4f(0, 0, 0, 1),
                     new Vector3f(ICON_SCALE, ICON_SCALE, ICON_DEPTH),
                     new AxisAngle4f(0, 0, 0, 1)));
