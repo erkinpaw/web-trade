@@ -24,8 +24,9 @@ public final class DepositGui {
     /** Верхние три ряда свободны под руду. */
     public static final int FREE_SLOTS = 27;
     public static final int SIZE = 36;
-    public static final int CONFIRM_SLOT = 31;
-    public static final int CANCEL_SLOT = 29;
+    /** Отмена и галочка стоят симметрично по обе стороны от середины нижнего ряда (31). */
+    public static final int CANCEL_SLOT = 30;
+    public static final int CONFIRM_SLOT = 32;
 
     /** Помечает наш инвентарь депозита. */
     public static final class Holder implements InventoryHolder {
@@ -53,7 +54,7 @@ public final class DepositGui {
     public static void open(Player player) {
         Holder holder = new Holder();
         Inventory inventory = Bukkit.createInventory(holder, SIZE,
-                Component.text("Внести ары", NamedTextColor.AQUA));
+                Component.text("Внести ары", NamedTextColor.DARK_AQUA));
         for (int slot = FREE_SLOTS; slot < SIZE; slot++) {
             inventory.setItem(slot, Ui.filler());
         }
