@@ -38,7 +38,7 @@ public final class DemandGui extends PagedGui {
             double perStack = type == null ? 0.0 : type.pricePerStack();
             // Иконку не стакаем: числа на предметах сливаются в кашу, количество читается в подсказке.
             entries.add(Entry.inert(Ui.icon(material, Ui.name(material), List.of(
-                    Ui.text("Нужно: " + needed + " шт.", NamedTextColor.WHITE),
+                    Ui.amount("Нужно: ", needed, NamedTextColor.WHITE),
                     Ui.text("Цена за стак: " + Ui.money(perStack) + " ар", NamedTextColor.GOLD),
                     Component.empty(),
                     Ui.text("Добудьте и сдайте — оплата придёт сразу.")))));

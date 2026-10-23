@@ -162,6 +162,16 @@
   .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .ident { font-family: var(--mono); font-size: var(--step--2); color: var(--muted); }
   .resource { min-width: 150px; }
+  .resource .cell { display: flex; align-items: center; gap: 10px; }
+  .resource .label { min-width: 0; }
+
+  /* Значок из атласа: картинка одна на всю страницу, каждому предмету — свой кусок. */
+  .ico {
+    flex: none; width: 32px; height: 32px; border-radius: 6px;
+    background-color: var(--surface-sunk); background-repeat: no-repeat;
+    image-rendering: pixelated;
+  }
+  .ico.none { background: var(--surface-sunk); box-shadow: inset 0 0 0 1px var(--line); }
 
   /* Выбранное читается формой, а не только числом: полоса слева плюс заливка. */
   tbody tr[data-picked] td { background: var(--accent-tint); }
@@ -172,6 +182,20 @@
   .unit { padding: 6px 6px; }
   .cost { color: var(--muted); }
   tr[data-picked] .cost { color: var(--ink); font-weight: 550; }
+
+  .picks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px;
+           max-height: 280px; overflow-y: auto; }
+  .picks li { display: flex; align-items: center; gap: 8px; font-size: var(--step--1); }
+  .picks .ico { width: 24px; height: 24px; border-radius: 4px; }
+  .picks .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picks .n { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 3px;
+          border: 1px solid var(--line); border-radius: 999px; background: var(--surface-sunk);
+          font-size: var(--step--2); }
+  .chip .ico { width: 22px; height: 22px; border-radius: 999px; }
+  .chip b { font-family: var(--mono); font-weight: 600; }
 
   .shown { margin: 0; padding: 10px 14px; border-top: 1px solid var(--line); font-size: var(--step--2); color: var(--muted); }
   .empty { padding: 28px 14px; text-align: center; color: var(--muted); font-size: var(--step--1); }
@@ -219,8 +243,8 @@
     <div class="dropzone" id="dropzone" tabindex="0" role="button"
          aria-label="Загрузить схематику">
       <span class="strong">Перетащите схематику сюда</span>
-      <span class="sub">или нажмите, чтобы выбрать файл · .schematic и .schem · файл никуда не отправляется</span>
-      <input type="file" id="file" accept=".schematic,.schem" hidden>
+      <span class="sub">или нажмите, чтобы выбрать файл · .litematic, .schem и .schematic · файл никуда не отправляется</span>
+      <input type="file" id="file" accept=".litematic,.schematic,.schem" hidden>
     </div>
     <div class="report" id="report" hidden></div>
   </section>
@@ -228,7 +252,7 @@
   <div class="work">
     <section class="card">
       <div class="toolbar">
-        <input id="search" type="search" placeholder="Поиск: stone, planks, glass…" autocomplete="off">
+        <input id="search" type="search" placeholder="Поиск: камень, доски, stone, glass…" autocomplete="off">
         <label class="toggle"><input type="checkbox" id="onlyPicked"> только выбранные</label>
       </div>
       <div class="tablewrap">
@@ -254,6 +278,7 @@
         <div class="figure"><span class="k">позиций</span><span class="v" id="count">0</span></div>
         <div class="figure"><span class="k">итого</span><span class="v accent" id="total">0.00 ар</span></div>
       </div>
+      <ul class="picks" id="picks" hidden></ul>
       <textarea id="out" readonly placeholder="Здесь появится список для вставки в игру"></textarea>
       <div class="actions">
         <button class="primary" id="copy">Скопировать</button>
@@ -270,6 +295,8 @@
   /** Старые числовые ID блоков: собрать такую таблицу может только сервер. */
   const LEGACY = __LEGACY_JSON__;
   const STAMP = "__STAMP__";
+  /** Атлас значков рядом со страницей; null — значков нет. */
+  const ICONS = __ICONS_JSON__;
 
   const STACK = 64;
   const SHULKER = 27 * 64;
@@ -297,6 +324,18 @@
   const money = value => value.toFixed(2);
   const grouped = value => value.toLocaleString("ru-RU");
 
+  /** Значок предмета: кусок атласа, показанный в половину размера (атлас нарисован вдвое крупнее). */
+  function icon(id) {
+    const r = byId.get(id);
+    if (!ICONS || !r || r.icon === undefined) return `<span class="ico none"></span>`;
+    const col = r.icon % ICONS.cols, row = Math.floor(r.icon / ICONS.cols);
+    const y = ICONS.rows > 1 ? row / (ICONS.rows - 1) * 100 : 0;
+    return `<span class="ico" style="background-image:url('${ICONS.file}');` +
+      `background-size:${ICONS.cols * 100}% ${ICONS.rows * 100}%;` +
+      `background-position:${col / (ICONS.cols - 1) * 100}% ${y}%"></span>`;
+  }
+  const nameOf = id => byId.has(id) ? byId.get(id).name : id;
+
   // ======================= каталог =======================
 
   function visibleRows() {
@@ -304,7 +343,8 @@
     return CATALOG.filter(r => {
       if (onlyPickedEl.checked && !picked.has(r.id)) return false;
       if (!query) return true;
-      return r.id.toLowerCase().includes(query) || r.name.toLowerCase().includes(query);
+      return r.id.toLowerCase().includes(query) || r.name.toLowerCase().includes(query)
+        || (r.en && r.en.toLowerCase().includes(query));
     });
   }
 
@@ -325,7 +365,8 @@
       const tr = document.createElement("tr");
       if (p) tr.dataset.picked = "";
       tr.innerHTML =
-        `<td class="resource">${r.name}<br><span class="ident">${r.id}</span></td>` +
+        `<td class="resource"><div class="cell">${icon(r.id)}<div class="label">${r.name}<br>` +
+          `<span class="ident">${r.id}</span></div></div></td>` +
         `<td class="num">${money(r.price)} ар</td>` +
         `<td class="num"><input class="qty" type="number" min="0" step="1" inputmode="numeric"
               data-id="${r.id}" value="${p ? p.amount : ""}" placeholder="0"
@@ -357,6 +398,11 @@
         lines.push(`${r.id} ${units}`);
       }
     }
+    const picks = document.getElementById("picks");
+    const chosen = CATALOG.filter(r => unitsOf(r.id) > 0);
+    picks.hidden = !chosen.length;
+    picks.innerHTML = chosen.map(r =>
+      `<li>${icon(r.id)}<span class="nm">${r.name}</span><span class="n">${grouped(unitsOf(r.id))}</span></li>`).join("");
     document.getElementById("count").textContent = lines.length;
     document.getElementById("total").textContent = money(total) + " ар";
     document.getElementById("out").value = lines.join("\n");
@@ -462,7 +508,15 @@
         }
         case 10: return this.compound();
         case 11: { const n = this.i32(); const a = new Int32Array(n); for (let i = 0; i < n; i++) a[i] = this.i32(); return a; }
-        case 12: { const n = this.i32(); const a = new BigInt64Array(n); for (let i = 0; i < n; i++) a[i] = this.i64(); return a; }
+        case 12: {
+          // long[] храним как пары 32-битных слов «младшее, старшее»: так биты читаются без BigInt
+          const n = this.i32(); const words = new Uint32Array(n * 2);
+          for (let i = 0; i < n; i++) {
+            words[2 * i + 1] = this.view.getUint32(this.at); words[2 * i] = this.view.getUint32(this.at + 4);
+            this.at += 8;
+          }
+          return { longs: n, words };
+        }
         default: throw new Error("неизвестный тег NBT: " + type);
       }
     }
@@ -497,6 +551,55 @@
     return bare.toUpperCase();
   }
 
+  /** «minecraft:oak_door[half=upper,facing=east]» → имя и свойства. */
+  function splitState(state) {
+    const text = String(state), at = text.indexOf("[");
+    const props = {};
+    if (at >= 0) for (const pair of text.slice(at + 1, -1).split(",")) {
+      const [k, v] = pair.split("="); if (k) props[k] = v;
+    }
+    return { id: stateToId(text), props };
+  }
+
+  const AIR = new Set(["AIR", "CAVE_AIR", "VOID_AIR"]);
+  /** Блок, который в мире выглядит иначе, чем предмет, из которого его ставят. */
+  const AS_ITEM = {
+    KELP_PLANT: "KELP", CAVE_VINES: "GLOW_BERRIES", CAVE_VINES_PLANT: "GLOW_BERRIES",
+    TWISTING_VINES_PLANT: "TWISTING_VINES", WEEPING_VINES_PLANT: "WEEPING_VINES",
+    BAMBOO_SAPLING: "BAMBOO", REDSTONE_WIRE: "REDSTONE", TRIPWIRE: "STRING",
+    BIG_DRIPLEAF_STEM: "BIG_DRIPLEAF", WATER_CAULDRON: "CAULDRON", LAVA_CAULDRON: "CAULDRON",
+    POWDER_SNOW_CAULDRON: "CAULDRON", CARROTS: "CARROT", POTATOES: "POTATO",
+    BEETROOTS: "BEETROOT_SEEDS", WHEAT: "WHEAT_SEEDS", COCOA: "COCOA_BEANS",
+    SWEET_BERRY_BUSH: "SWEET_BERRIES", MELON_STEM: "MELON_SEEDS", ATTACHED_MELON_STEM: "MELON_SEEDS",
+    PUMPKIN_STEM: "PUMPKIN_SEEDS", ATTACHED_PUMPKIN_STEM: "PUMPKIN_SEEDS",
+    TORCHFLOWER_CROP: "TORCHFLOWER_SEEDS", PITCHER_CROP: "PITCHER_POD",
+    POTTED_AZALEA_BUSH: "AZALEA", POTTED_FLOWERING_AZALEA_BUSH: "FLOWERING_AZALEA",
+    WALL_TORCH: "TORCH"
+  };
+  /** Служебные блоки: предметом не бывают, в заказ не идут. */
+  const NOT_AN_ITEM = new Set(["PISTON_HEAD", "MOVING_PISTON", "FIRE", "SOUL_FIRE", "NETHER_PORTAL",
+    "END_PORTAL", "END_GATEWAY", "BUBBLE_COLUMN", "FROSTED_ICE", "LIGHT"]);
+  /** Свойство, в котором блок хранит, сколько предметов в нём стоит. */
+  const STACKED = { candles: 1, pickles: 1, eggs: 1, layers: 1, flower_amount: 1, segment_amount: 1 };
+
+  /**
+   * Сколько и каких предметов нужно, чтобы поставить блок: двери и кровати — одна на две клетки,
+   * двойная плита — две плиты, горшок с цветком — горшок и цветок, факел на стене — просто факел.
+   * Как список материалов в Litematica.
+   */
+  function itemsFor(id, props) {
+    if (AIR.has(id) || NOT_AN_ITEM.has(id)) return [];
+    if (props.half === "upper" && !id.endsWith("_STAIRS") && !id.endsWith("_TRAPDOOR")) return [];
+    if (id.endsWith("_BED") && props.part === "head") return [];
+    if (id.endsWith("_SLAB") && props.type === "double") return [[id, 2]];
+    if (id === "CANDLE_CAKE" || id.endsWith("_CANDLE_CAKE")) return [["CAKE", 1], [id.replace("_CAKE", ""), 1]];
+    if (id.startsWith("POTTED_")) return [["FLOWER_POT", 1], [AS_ITEM[id] || id.slice(7), 1]];
+    for (const key in STACKED) if (props[key]) return [[AS_ITEM[id] || id, Number(props[key]) || 1]];
+    if (AS_ITEM[id]) return [[AS_ITEM[id], 1]];
+    const wall = id.replace(/_WALL_(?=TORCH$|SIGN$|HANGING_SIGN$|BANNER$|HEAD$|SKULL$|FAN$)/, "_");
+    return [[wall, 1]];
+  }
+
   function legacyToId(blockId, data) {
     const entry = LEGACY[blockId];
     if (entry === undefined) return null;
@@ -512,7 +615,10 @@
     if (!palette || !data) return null;
 
     const byIndex = [];
-    for (const [state, index] of Object.entries(palette)) byIndex[Number(index)] = stateToId(state);
+    for (const [state, index] of Object.entries(palette)) {
+      const { id, props } = splitState(state);
+      byIndex[Number(index)] = itemsFor(id, props);
+    }
 
     const counts = new Map();
     let at = 0, total = 0;
@@ -525,11 +631,8 @@
         shift += 7;
         if (shift > 35) throw new Error("испорченный поток блоков");
       }
-      const id = byIndex[value];
       total++;
-      if (id && id !== "AIR" && id !== "CAVE_AIR" && id !== "VOID_AIR") {
-        counts.set(id, (counts.get(id) || 0) + 1);
-      }
+      for (const [id, n] of byIndex[value] || []) counts.set(id, (counts.get(id) || 0) + n);
     }
     return {
       counts,
@@ -538,6 +641,41 @@
       scanned: total,
       unknown: 0,
       format: "Sponge .schem"
+    };
+  }
+
+  /**
+   * Litematica .litematic: несколько регионов, у каждого своя палитра и упакованный поток
+   * индексов. Индексы лежат плотно, по {bits} бит, и переходят через границу 64-битных слов.
+   */
+  function parseLitematic(root) {
+    const counts = new Map();
+    let scanned = 0;
+    for (const region of Object.values(root.Regions)) {
+      const palette = (region.BlockStatePalette || []).map(entry => itemsFor(stateToId(entry.Name), entry.Properties || {}));
+      const states = region.BlockStates;
+      const size = region.Size || {};
+      const volume = Math.abs(size.x || 0) * Math.abs(size.y || 0) * Math.abs(size.z || 0);
+      if (!palette.length || !states || !volume) continue;
+
+      const bits = Math.max(2, Math.ceil(Math.log2(palette.length)));
+      const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1;
+      const words = states.words;
+      for (let i = 0; i < volume; i++) {
+        const at = i * bits, w = at >>> 5, offset = at & 31;
+        let value = words[w] >>> offset;
+        if (offset + bits > 32) value |= words[w + 1] << (32 - offset);
+        const items = palette[(value & mask) >>> 0];
+        if (items && items.length) scanned++;
+        for (const [id, n] of items || []) counts.set(id, (counts.get(id) || 0) + n);
+      }
+    }
+    const box = (root.Metadata && root.Metadata.EnclosingSize) || {};
+    return {
+      counts, scanned, unknown: 0,
+      size: [Math.abs(box.x || 0), Math.abs(box.y || 0), Math.abs(box.z || 0)],
+      regions: Object.keys(root.Regions).length,
+      format: "Litematica .litematic"
     };
   }
 
@@ -575,7 +713,7 @@
     const raw = await file.arrayBuffer();
     const root = new Nbt(await ungzip(raw)).root();
 
-    if (root.Regions) throw new Error("формат .litematic пока не поддерживается");
+    if (root.Regions) return parseLitematic(root);
 
     const parsed = parseSponge(root.Schematic || root) || parseLegacy(root);
     if (!parsed) throw new Error("не похоже на схематику: нет ни палитры, ни блоков");
@@ -605,7 +743,10 @@
          <div class="figure"><span class="k">позиций</span><span class="v">${tradeable.size}</span></div>
          <div class="figure"><span class="k">выйдет в</span><span class="v accent">${money(cost)} ар</span></div>
        </div>
-       <p class="hint">${fileName} · ${parsed.format}</p>
+       <div class="chips">${[...tradeable].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([id, n]) =>
+          `<span class="chip" title="${id}">${icon(id)}${nameOf(id)} <b>${grouped(n)}</b></span>`).join("")}${
+          tradeable.size > 12 ? `<span class="chip">+ ещё ${tradeable.size - 12}</span>` : ""}</div>
+       <p class="hint">${fileName} · ${parsed.format}${parsed.regions > 1 ? " · регионов: " + parsed.regions : ""}</p>
        <div class="actions">
          <button class="primary" id="applySchem">Добавить в заказ</button>
          <button id="replaceSchem">Заменить заказ</button>

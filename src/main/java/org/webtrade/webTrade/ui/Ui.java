@@ -66,9 +66,33 @@ public final class Ui {
         return stack;
     }
 
-    /** Серая заглушка для пустых мест в меню. */
+    /** Тёмная заглушка для пустых мест: без подсказки, чтобы наведение не показывало пустую рамку. */
     public static ItemStack filler() {
-        return icon(Material.GRAY_STAINED_GLASS_PANE, Component.empty(), List.of());
+        ItemStack stack = icon(Material.BLACK_STAINED_GLASS_PANE, Component.empty(), List.of());
+        stack.editMeta(meta -> meta.setHideTooltip(true));
+        return stack;
+    }
+
+    /** «30 000 шт. · ≈ 468 стаков» — добытчику проще прикинуть в стаках. */
+    public static Component amount(String label, int units, NamedTextColor color) {
+        String text = label + String.format(java.util.Locale.ROOT, "%,d", units).replace(',', ' ') + " шт.";
+        Component line = text(text, color);
+        if (units >= 64) {
+            line = line.append(text(" · ≈ " + String.format(java.util.Locale.ROOT, "%,d", Math.round(units / 64.0))
+                    .replace(',', ' ') + " ст.", NamedTextColor.DARK_GRAY));
+        }
+        return line;
+    }
+
+    /** Подсказка по клику: клавиша жёлтым, действие серым. */
+    public static Component hint(String key, String action) {
+        return text(key, NamedTextColor.YELLOW).append(text(" · " + action, NamedTextColor.GRAY));
+    }
+
+    /** Блеск зачарования — так в меню выделяется то, что сейчас важно (например, непустой контейнер). */
+    public static ItemStack glint(ItemStack stack) {
+        stack.editMeta(meta -> meta.setEnchantmentGlintOverride(true));
+        return stack;
     }
 
     /** Настройки колбэка кнопки диалога: жмут сколько угодно раз, пока экран открыт. */

@@ -47,6 +47,9 @@ commands:
     permission: webtrade.admin
 
 permissions:
+  webtrade.command:
+    description: Открывать биржу командами откуда угодно (без него — только на стендах)
+    default: true
   webtrade.demand:
     description: Доступ к списку спроса
     default: true

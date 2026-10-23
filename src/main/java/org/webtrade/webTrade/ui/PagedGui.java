@@ -31,6 +31,7 @@ public abstract class PagedGui implements InventoryHolder {
     protected static final int SLOT_PREV = 45;
     protected static final int SLOT_BACK = 49;
     protected static final int SLOT_NEXT = 53;
+    protected static final int SLOT_PAGE = 50;
 
     /** Строка меню: как выглядит и что делает по клику. */
     public record Entry(org.bukkit.inventory.ItemStack icon, BiConsumer<Player, ClickType> onClick) {
@@ -105,6 +106,11 @@ public abstract class PagedGui implements InventoryHolder {
                     List.of(Ui.text("Страница " + (page + 2) + " из " + pages))));
         }
         inventory.setItem(SLOT_BACK, Ui.icon(Material.BARRIER, backLabel(), List.of()));
+        if (pages > 1) {
+            inventory.setItem(SLOT_PAGE, Ui.icon(Material.PAPER, page + 1,
+                    Ui.text("Страница " + (page + 1) + " из " + pages, NamedTextColor.WHITE),
+                    List.of(Ui.text("Всего позиций: " + rendered.size()))));
+        }
 
         footer().forEach((slot, entry) -> {
             if (slot >= PAGE_SIZE && slot < SIZE) {
