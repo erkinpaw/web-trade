@@ -364,7 +364,7 @@ public final class MarketManager {
         return totals;
     }
 
-    public List<Container> containersOf(UUID owner) {
+    public synchronized List<Container> containersOf(UUID owner) {
         List<Container> result = new ArrayList<>();
         for (Container container : containers.values()) {
             if (container.owner().equals(owner)) {
@@ -375,12 +375,12 @@ public final class MarketManager {
         return result;
     }
 
-    public Container get(int id) {
+    public synchronized Container get(int id) {
         return containers.get(id);
     }
 
     /** Активные контейнеры в порядке создания — очередь FIFO для сведения. */
-    public List<Container> activeByAge() {
+    public synchronized List<Container> activeByAge() {
         List<Container> result = new ArrayList<>();
         for (Container container : containers.values()) {
             if (container.status() == Container.Status.ACTIVE) {

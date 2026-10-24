@@ -47,7 +47,7 @@ public final class CurrencyListener implements Listener {
             return;
         }
         // Закрывать инвентарь прямо в обработчике клика нельзя — расчёт будет на закрытии.
-        plugin.getServer().getScheduler().runTask(plugin, () -> player.closeInventory());
+        player.getScheduler().run(plugin, t -> player.closeInventory(), null);
     }
 
     @EventHandler
@@ -76,8 +76,7 @@ public final class CurrencyListener implements Listener {
         }
         double ares = currency.settleDeposit(player, event.getInventory());
         if (ares > 0) {
-            plugin.getServer().getScheduler().runTask(plugin,
-                    () -> screens.depositResult(player, ares));
+            player.getScheduler().run(plugin, t -> screens.depositResult(player, ares), null);
         }
     }
 }

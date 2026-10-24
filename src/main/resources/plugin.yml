@@ -2,6 +2,7 @@ name: WebTrade
 version: '${version}'
 
 main: org.webtrade.webTrade.WebTrade
+folia-supported: true
 api-version: '26.3'
 load: POSTWORLD
 

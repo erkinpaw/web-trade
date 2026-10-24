@@ -67,7 +67,7 @@ public final class WebTrade extends JavaPlugin {
         this.stands = new StandManager(this, new DemandContent(market, resources, screens));
 
         // Добытчику, которому склад закрыли новым спросом, пишем в чат — если он в сети.
-        market.setPayoutListener(payout -> getServer().getScheduler().runTask(this, () -> {
+        market.setPayoutListener(payout -> {
             Player seller = getServer().getPlayer(payout.seller());
             if (seller != null) {
                 seller.sendMessage(Component.text("Ваш склад: продано " + payout.amount() + " × ",
@@ -76,7 +76,7 @@ public final class WebTrade extends JavaPlugin {
                         .append(Component.text(" за " + MarketManager.money(payout.money()) + " ар.",
                                 NamedTextColor.GREEN)));
             }
-        }));
+        });
 
         var pm = getServer().getPluginManager();
         pm.registerEvents(new JoinListener(accounts), this);
@@ -103,10 +103,10 @@ public final class WebTrade extends JavaPlugin {
         exportCalculator(config.getBoolean("calculator.export-on-start", true));
 
         // Страховка от потери данных при падении сервера.
-        getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+        getServer().getAsyncScheduler().runAtFixedRate(this, t -> {
             accounts.save();
             market.save();
-        }, AUTOSAVE_TICKS, AUTOSAVE_TICKS);
+        }, AUTOSAVE_TICKS * 50, AUTOSAVE_TICKS * 50, java.util.concurrent.TimeUnit.MILLISECONDS);
 
         getLogger().info("WebTrade включён. Ресурсов в каталоге: " + resources.all().size());
     }
@@ -150,7 +150,7 @@ public final class WebTrade extends JavaPlugin {
         writeCalculator(legacy);
         // Значков ещё нет — качаем и рисуем в фоне, потом выгружаем страницу ещё раз.
         if (!calculatorAssets.hasIcons() && getConfig().getBoolean("calculator.icons", true)) {
-            getServer().getScheduler().runTaskAsynchronously(this, () -> {
+            getServer().getAsyncScheduler().runNow(this, t -> {
                 CalculatorAssets.Result fresh = assets.prepare(version, ids);
                 if (fresh.hasIcons() || !fresh.names().isEmpty()) {
                     calculatorAssets = fresh;

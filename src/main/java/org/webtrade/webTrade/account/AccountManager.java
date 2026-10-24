@@ -64,7 +64,7 @@ public final class AccountManager {
         }
     }
 
-    public Account getOrCreate(UUID uuid, String name) {
+    public synchronized Account getOrCreate(UUID uuid, String name) {
         Account account = accounts.computeIfAbsent(uuid, u -> new Account(u, name, 0.0));
         if (name != null && !name.isEmpty()) {
             account.setName(name);
