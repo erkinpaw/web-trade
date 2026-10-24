@@ -49,7 +49,7 @@ public final class SellListener implements Listener {
         event.setCancelled(true);
         if (slot == SellGui.CONFIRM_SLOT && event.getWhoClicked() instanceof Player player) {
             // Закрывать инвентарь прямо в обработчике клика нельзя — расчёт будет на закрытии.
-            plugin.getServer().getScheduler().runTask(plugin, () -> player.closeInventory());
+            player.getScheduler().run(plugin, t -> player.closeInventory(), null);
         }
     }
 
@@ -121,8 +121,7 @@ public final class SellListener implements Listener {
         // Итог показываем диалогом: там же кнопка «Сдать ещё», чтобы не бегать в меню.
         double total = earned;
         int stored = storedTotal;
-        plugin.getServer().getScheduler().runTask(plugin,
-                () -> screens.sellResult(player, total, stored));
+        player.getScheduler().run(plugin, t -> screens.sellResult(player, total, stored), null);
     }
 
     /** Сдавать можно только чистые торгуемые предметы без модификаций. */

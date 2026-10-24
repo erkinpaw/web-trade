@@ -157,12 +157,12 @@ public final class Screens {
                                 .action(DialogAction.customClick((view, audience) -> {
                                     Float raw = view.getFloat("ore");
                                     int ore = raw == null ? 0 : Math.round(raw);
-                                    later(() -> doWithdraw(player, ore));
+                                    later(player, () -> doWithdraw(player, ore));
                                 }, Ui.callback()))
                                 .build(),
                         ActionButton.builder(Ui.text("← В меню", NamedTextColor.YELLOW))
                                 .action(DialogAction.customClick(
-                                        (view, audience) -> later(() -> mainMenu(player)), Ui.callback()))
+                                        (view, audience) -> later(player, () -> mainMenu(player)), Ui.callback()))
                                 .build()))));
     }
 
@@ -217,7 +217,7 @@ public final class Screens {
                 .type(DialogType.confirmation(
                         ActionButton.builder(Ui.text("Сдать ещё", NamedTextColor.GREEN))
                                 .action(DialogAction.customClick((view, audience) ->
-                                        later(() -> SellGui.open(player)), Ui.callback()))
+                                        later(player, () -> SellGui.open(player)), Ui.callback()))
                                 .build(),
                         button("← В меню", null, WIDTH_MEDIUM, this::mainMenu)))));
     }
@@ -236,7 +236,7 @@ public final class Screens {
                 .action(DialogAction.customClick((view, audience) -> {
                     String name = view.getText("name");
                     String raw = view.getText("list");
-                    later(() -> applyPastedList(player, name, raw));
+                    later(player, () -> applyPastedList(player, name, raw));
                 }, Ui.callback()))
                 .build());
         if (!calculatorUrl.isEmpty()) {
@@ -323,7 +323,7 @@ public final class Screens {
                                         .width(WIDTH_MEDIUM)
                                         .action(DialogAction.customClick((view, audience) -> {
                                             String query = view.getText("query");
-                                            later(() -> {
+                                            later(player, () -> {
                                                 catalog.filter(query);
                                                 catalog.open(player);
                                             });
@@ -363,12 +363,12 @@ public final class Screens {
                         ActionButton.builder(Ui.text("Записать", NamedTextColor.GREEN))
                                 .action(DialogAction.customClick((view, audience) -> {
                                     String raw = view.getText("amount");
-                                    later(() -> applyAmount(player, material, raw));
+                                    later(player, () -> applyAmount(player, material, raw));
                                 }, Ui.callback()))
                                 .build(),
                         ActionButton.builder(Ui.text("← В каталог", NamedTextColor.YELLOW))
                                 .action(DialogAction.customClick((view, audience) ->
-                                        later(() -> catalogFor(player).open(player)), Ui.callback()))
+                                        later(player, () -> catalogFor(player).open(player)), Ui.callback()))
                                 .build()))));
     }
 
@@ -435,7 +435,7 @@ public final class Screens {
                                 ActionButton.builder(Ui.text("Подтвердить оплату", NamedTextColor.GREEN))
                                         .width(WIDTH_WIDE)
                                         .action(DialogAction.customClick((view, audience) ->
-                                                later(() -> payCart(player)), Ui.callback()))
+                                                later(player, () -> payCart(player)), Ui.callback()))
                                         .build(),
                                 button("Очистить заказ", "Убрать все позиции", WIDTH_MEDIUM,
                                         p -> {
@@ -573,11 +573,11 @@ public final class Screens {
                 .type(DialogType.confirmation(
                         ActionButton.builder(Ui.text("Отменить и вернуть", NamedTextColor.RED))
                                 .action(DialogAction.customClick((view, audience) ->
-                                        later(() -> doCancel(player, container)), Ui.callback()))
+                                        later(player, () -> doCancel(player, container)), Ui.callback()))
                                 .build(),
                         ActionButton.builder(Ui.text("Оставить", NamedTextColor.YELLOW))
                                 .action(DialogAction.customClick((view, audience) ->
-                                        later(() -> containerDetail(player, container.id())),
+                                        later(player, () -> containerDetail(player, container.id())),
                                         Ui.callback()))
                                 .build()))));
     }
@@ -626,7 +626,7 @@ public final class Screens {
                 .width(width)
                 .action(DialogAction.customClick((view, audience) -> {
                     if (audience instanceof Player player) {
-                        later(() -> onClick.accept(player));
+                        later(player, () -> onClick.accept(player));
                     }
                 }, Ui.callback()));
         if (tooltip != null) {
@@ -639,8 +639,8 @@ public final class Screens {
         player.showDialog(dialog);
     }
 
-    /** Работу с биржей и инвентарями делаем в главном потоке. */
-    private void later(Runnable action) {
-        plugin.getServer().getScheduler().runTask(plugin, action);
+    /** Работу с инвентарём игрока делаем в его потоке (на Folia — поток его региона, на Paper — главный). */
+    private void later(Player player, Runnable action) {
+        player.getScheduler().run(plugin, t -> action.run(), null);
     }
 }

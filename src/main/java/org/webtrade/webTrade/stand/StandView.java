@@ -269,8 +269,14 @@ public final class StandView {
 
     public void despawn() {
         spawned.forEach(entity -> {
-            if (entity.isValid()) {
+            if (!entity.isValid()) {
+                return;
+            }
+            // Folia: only the entity's own region may remove it (a player who left — from another thread)
+            if (org.bukkit.Bukkit.isOwnedByCurrentRegion(entity)) {
                 entity.remove();
+            } else {
+                entity.getScheduler().run(plugin, t -> entity.remove(), null);
             }
         });
         spawned.clear();

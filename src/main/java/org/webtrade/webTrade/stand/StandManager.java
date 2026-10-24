@@ -48,11 +48,12 @@ public final class StandManager implements Listener {
     private final StandContent content;
     private final File file;
 
-    private final List<BoardLayout> stands = new ArrayList<>();
-    private final Map<UUID, StandView> views = new HashMap<>();
-    private final Map<UUID, Long> lastClick = new HashMap<>();
+    // Folia: every player's view is ticked by that player's region, so these are touched from many threads
+    private final List<BoardLayout> stands = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final Map<UUID, StandView> views = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastClick = new java.util.concurrent.ConcurrentHashMap<>();
 
-    private int taskId = -1;
+    private io.papermc.paper.threadedregions.scheduler.ScheduledTask task;
     /** Счётчик тиков: цифры на стенде обновляем реже, чем следим за подходом игроков. */
     private int ticks;
 
@@ -66,14 +67,14 @@ public final class StandManager implements Listener {
     // ---------- жизненный цикл ----------
 
     public void start() {
-        taskId = plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick,
-                TASK_PERIOD, TASK_PERIOD).getTaskId();
+        task = plugin.getServer().getGlobalRegionScheduler().runAtFixedRate(plugin, t -> tick(),
+                TASK_PERIOD, TASK_PERIOD);
     }
 
     public void stop() {
-        if (taskId != -1) {
-            plugin.getServer().getScheduler().cancelTask(taskId);
-            taskId = -1;
+        if (task != null) {
+            task.cancel();
+            task = null;
         }
         views.values().forEach(StandView::despawn);
         views.clear();
@@ -81,28 +82,10 @@ public final class StandManager implements Listener {
 
     /** Раз в полсекунды решаем, кому стенд показать, кому убрать и что подсветить. */
     private void tick() {
+        boolean refresh = ++ticks % (40 / TASK_PERIOD) == 0;
+        // the stand and its entities are next to the player: the player's region owns them all
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            StandView view = views.get(player.getUniqueId());
-            BoardLayout nearby = nearest(player.getLocation(), SHOW_RADIUS);
-
-            if (view == null) {
-                if (nearby != null) {
-                    StandView fresh = new StandView(plugin, nearby, player, content, this::assets);
-                    views.put(player.getUniqueId(), fresh);
-                    fresh.spawn();
-                }
-                continue;
-            }
-            if (nearest(player.getLocation(), HIDE_RADIUS) == null) {
-                view.despawn();
-                views.remove(player.getUniqueId());
-                continue;
-            }
-            view.hover(lookedRow(player, view));
-        }
-        // Спрос меняется от чужих сделок — раз в две секунды освежаем цифры сами.
-        if (++ticks % (40 / TASK_PERIOD) == 0) {
-            refreshAll();
+            player.getScheduler().run(plugin, t -> tick(player, refresh), null);
         }
         // Игроки, которые вышли между тиками, могли оставить за собой сущности.
         views.entrySet().removeIf(entry -> {
@@ -115,9 +98,40 @@ public final class StandManager implements Listener {
         });
     }
 
+    private void tick(Player player, boolean refresh) {
+        {
+            StandView view = views.get(player.getUniqueId());
+            BoardLayout nearby = nearest(player.getLocation(), SHOW_RADIUS);
+
+            if (view == null) {
+                if (nearby != null) {
+                    StandView fresh = new StandView(plugin, nearby, player, content, this::assets);
+                    views.put(player.getUniqueId(), fresh);
+                    fresh.spawn();
+                }
+                return;
+            }
+            if (nearest(player.getLocation(), HIDE_RADIUS) == null) {
+                view.despawn();
+                views.remove(player.getUniqueId());
+                return;
+            }
+            view.hover(lookedRow(player, view));
+            // Спрос меняется от чужих сделок — раз в две секунды освежаем цифры сами.
+            if (refresh) {
+                view.refresh();
+            }
+        }
+    }
+
     /** Перерисовать всем, кто сейчас у стендов, — после сделки цифры устарели. */
     public void refreshAll() {
-        views.values().forEach(StandView::refresh);
+        views.forEach((id, view) -> {
+            Player player = plugin.getServer().getPlayer(id);
+            if (player != null) {
+                player.getScheduler().run(plugin, t -> view.refresh(), null);
+            }
+        });
     }
 
     private BoardLayout nearest(Location where, double radius) {
@@ -208,8 +222,7 @@ public final class StandManager implements Listener {
 
         event.setCancelled(true);
         // Клиент уже подвинул выделение у себя — возвращаем слот на место следующим тиком.
-        plugin.getServer().getScheduler().runTask(plugin,
-                () -> player.getInventory().setHeldItemSlot(previous));
+        player.getScheduler().run(plugin, t -> player.getInventory().setHeldItemSlot(previous), null);
         view.scroll(delta > 0 ? 1 : -1);
     }
 
