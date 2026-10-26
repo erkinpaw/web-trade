@@ -391,8 +391,17 @@ public final class MarketManager {
         return result;
     }
 
+    /**
+     * Сумма в арах. Обычно два знака после запятой, но у мелочи меньше одного ара — до двух значащих
+     * цифр (до 4 знаков): цена штуки листвы 0.0006 и бревна 0.0078 иначе обе показывались бы как 0.00.
+     */
     public static String money(double value) {
-        return String.format(Locale.US, "%.2f", value);
+        double abs = Math.abs(value);
+        if (abs == 0 || abs >= 0.1) {
+            return String.format(Locale.US, "%.2f", value);
+        }
+        int decimals = Math.min(4, 1 - (int) Math.floor(Math.log10(abs)));
+        return String.format(Locale.US, "%." + decimals + "f", value);
     }
 
     // ---------- персистентность ----------
