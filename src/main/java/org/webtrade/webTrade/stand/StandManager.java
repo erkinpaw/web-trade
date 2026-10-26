@@ -81,7 +81,11 @@ public final class StandManager implements Listener {
             task.cancel();
             task = null;
         }
-        views.values().forEach(StandView::despawn);
+        // Stand entities are not persistent: on shutdown they vanish with the world and must not be
+        // touched — Folia's shutdown thread has no region data, and removing them there throws.
+        if (!plugin.getServer().isStopping()) {
+            views.values().forEach(StandView::despawn);
+        }
         views.clear();
     }
 
