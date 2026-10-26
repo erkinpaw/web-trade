@@ -237,15 +237,16 @@ public final class StandManager implements Listener {
         if (delta == 0) {
             return;
         }
-        // Клиент шлёт слот раз в тик, только итог. Сильный рывок колеса — 5–8 щелчков за тик — по
+        // Клиент шлёт слот раз в тик, только итог. Сильный рывок колеса — 5–6 щелчков за тик — по
         // кругу из 9 слотов выглядит короче в обратную сторону (6 вниз = 3 вверх), и список отскакивал
-        // назад. Внутри серии игрок крутит в одну сторону: такой скачок считаем в её направлении.
+        // назад. Поэтому большой скачок против направления серии считаем рывком в её сторону, а
+        // маленький (1–2 щелчка) — настоящим разворотом: иначе крутнуть назад было нельзя, и у края
+        // списка стенд будто застревал.
         Integer direction = scrollDirection.get(id);
-        if (direction != null && Integer.signum(delta) != direction) {
+        if (direction != null && Integer.signum(delta) != direction && Math.abs(delta) >= 3) {
             delta += 9 * direction;
-        } else if (direction == null) {
-            scrollDirection.put(id, Integer.signum(delta));
         }
+        scrollDirection.put(id, Integer.signum(delta));
 
         view.scroll(delta);
         boolean burstStarted = scrollHome.putIfAbsent(id, previous) == null;
