@@ -41,6 +41,8 @@ public final class StandManager implements Listener {
     /** Подсветку строки под взглядом обновляем часто, иначе она отстаёт от мыши. */
     private static final int TASK_PERIOD = 4;
     private static final long CLICK_COOLDOWN_MS = 500;
+    /** Через сколько тишины после последнего щелчка колеса хотбар возвращается на место. */
+    private static final long SCROLL_SETTLE_MS = 250;
 
     private static final int DEFAULT_ROWS = BoardLayout.DEFAULT_ROWS;
 
@@ -52,6 +54,9 @@ public final class StandManager implements Listener {
     private final List<BoardLayout> stands = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final Map<UUID, StandView> views = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<UUID, Long> lastClick = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Серия прокрутки колесом: слот, с которого игрок начал, и время последнего щелчка. */
+    private final Map<UUID, Integer> scrollHome = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastScroll = new java.util.concurrent.ConcurrentHashMap<>();
 
     private io.papermc.paper.threadedregions.scheduler.ScheduledTask task;
     /** Счётчик тиков: цифры на стенде обновляем реже, чем следим за подходом игроков. */
@@ -191,8 +196,12 @@ public final class StandManager implements Listener {
     }
 
     /**
-     * Прокрутка колесом. Смена слота хотбара — единственный способ поймать колесо
-     * ванильным клиентом, поэтому у стенда мы её перехватываем и возвращаем слот назад.
+     * Прокрутка колесом. Смена слота хотбара — единственный способ поймать колесо ванильным
+     * клиентом. Возвращать слот после каждого щелчка нельзя: клиент крутит хотбар сам, не дожидаясь
+     * сервера, и при быстрой прокрутке успевает уйти на несколько слотов, пока ответ в пути, — тогда
+     * сдвиг считается не от того слота, и список дёргается назад. Поэтому во время серии щелчков
+     * слот не трогаем (сдвиг точный: клиент и сервер видят одно и то же), а вернуть его на место,
+     * где серия началась, — через {@link #SCROLL_SETTLE_MS} после последнего щелчка.
      */
     @EventHandler
     public void onScroll(PlayerItemHeldEvent event) {
@@ -205,6 +214,7 @@ public final class StandManager implements Listener {
         // просто сменить предмет в руке. Смотрим на всю доску, а не в строку: промахи между
         // строк раньше съедали щелчки колеса, и прокрутка шла рывками.
         if (view.layout().look(player.getEyeLocation(), player.getEyeLocation().getDirection(), LOOK_DISTANCE) == null) {
+            scrollHome.remove(player.getUniqueId()); // отвернулся и сам выбирает слот — не перебиваем
             return;
         }
 
@@ -220,14 +230,36 @@ public final class StandManager implements Listener {
             return;
         }
 
-        event.setCancelled(true);
-        // Клиент уже подвинул выделение у себя — возвращаем слот на место следующим тиком.
-        player.getScheduler().run(plugin, t -> player.getInventory().setHeldItemSlot(previous), null);
-        view.scroll(delta > 0 ? 1 : -1);
+        view.scroll(delta);
+        UUID id = player.getUniqueId();
+        boolean burstStarted = scrollHome.putIfAbsent(id, previous) == null;
+        lastScroll.put(id, System.currentTimeMillis());
+        if (burstStarted) {
+            settleScroll(player);
+        }
+    }
+
+    /** Когда колесо затихло — вернуть в руку тот слот, с которого игрок начал крутить. */
+    private void settleScroll(Player player) {
+        player.getScheduler().runDelayed(plugin, t -> {
+            UUID id = player.getUniqueId();
+            long quiet = System.currentTimeMillis() - lastScroll.getOrDefault(id, 0L);
+            if (quiet < SCROLL_SETTLE_MS) {
+                settleScroll(player);
+                return;
+            }
+            Integer home = scrollHome.remove(id);
+            lastScroll.remove(id);
+            if (home != null && player.isOnline()) {
+                player.getInventory().setHeldItemSlot(home);
+            }
+        }, null, 3L);
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
+        scrollHome.remove(event.getPlayer().getUniqueId());
+        lastScroll.remove(event.getPlayer().getUniqueId());
         StandView view = views.remove(event.getPlayer().getUniqueId());
         if (view != null) {
             view.despawn();
