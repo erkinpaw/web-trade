@@ -1,0 +1,15 @@
+Тестовые схематики для калькулятора. Все взяты из тестовых наборов открытых
+проектов под лицензией MIT — их можно свободно хранить и использовать.
+
+green-cottage.schem        SandroHc/schematic4j  src/test/resources/schematics/sponge/v2/green-cottage.schem
+interieur-exterieur.schem  SandroHc/schematic4j  src/test/resources/schematics/sponge/v2/interieur-exterieur-chunk-project.schem
+build-12727.schematic      SandroHc/schematic4j  src/test/resources/schematics/schematica/12727.schematic
+smallhouse1.schem          PrismarineJS/prismarine-schematic  test/schematics/smallhouse1.schem
+viking-house1.schematic    PrismarineJS/prismarine-schematic  test/schematics/viking-house1.schematic
+
+Что выдаёт калькулятор (22.10.2026):
+  green-cottage        17×12×12,   627 блоков,  13 позиций,   1.10 ар
+  smallhouse1          21×28×20,  3189 блоков,  53 позиции,   5.82 ар  (пропущены: кровать, баннер, цепь)
+  viking-house1        23×35×23,  2492 блока,   14 позиций,   5.55 ар
+  build-12727          86×82×101, 112814 блоков, 72 позиции, 173.91 ар
+  interieur-exterieur  128×18×128, 35528 блоков, 303 позиции,  72.45 ар

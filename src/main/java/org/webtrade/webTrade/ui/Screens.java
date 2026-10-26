@@ -41,8 +41,11 @@ import java.util.function.Consumer;
  */
 public final class Screens {
 
-    /** Сколько позиций контейнера показываем в диалоге, прежде чем свернуть в «и ещё N». */
-    private static final int MAX_LINES_IN_DIALOG = 8;
+    /**
+     * Сколько позиций контейнера показываем в диалоге, прежде чем свернуть в «и ещё N».
+     * Больше пяти — и кнопки под списком приходится искать прокруткой.
+     */
+    private static final int MAX_LINES_IN_DIALOG = 5;
     /**
      * Потолок вставки. Формат диалога длину не ограничивает, но ответ приходит строкой NBT,
      * а там двухбайтовая длина — то есть 65535 байт. Берём с запасом: заказа на весь каталог
@@ -51,10 +54,24 @@ public final class Screens {
     private static final int MAX_PASTE_LENGTH = 40000;
     /** Строк тоже должно хватать на весь каталог. */
     private static final int MAX_PASTE_LINES = 1200;
+    /**
+     * Высота поля списка. Вставленное всё равно прокручивается, а при выше поле
+     * выталкивало кнопки за нижний край экрана на обычном масштабе интерфейса.
+     */
+    private static final int PASTE_HEIGHT = 100;
 
-    private static final int WIDTH_SMALL = 200;
-    private static final int WIDTH_MEDIUM = 240;
-    private static final int WIDTH_WIDE = 310;
+    /*
+     * Ширины диалога. Клиент раскладывает кнопки сеткой с зазором 2 пикселя и центрирует
+     * каждую в своей ячейке, так что ровные края получаются, только если широкая кнопка
+     * ровно вдвое шире узкой плюс зазор. Поля ввода и текст тянем на ту же ширину,
+     * чтобы весь экран стоял одной колонкой.
+     */
+    private static final int WIDTH_HALF = 160;
+    private static final int WIDTH_FULL = WIDTH_HALF * 2 + 2;
+    /** Текст в кнопке рисуется с отступом по краям: столько оставляем свободным. */
+    private static final int BUTTON_PADDING = 12;
+    /** Описание рядом с иконкой предмета: иконка 16 пикселей плюс небольшой зазор. */
+    private static final int ITEM_TEXT_WIDTH = WIDTH_FULL - 24;
 
     private final Plugin plugin;
     private final AccountManager accounts;
@@ -110,20 +127,20 @@ public final class Screens {
         // последней: при нечётном числе кнопок последняя остаётся одна в ряду.
         // Отсюда раскладка «пара / пара / широкая», а не «пара / широкая / пара».
         List<ActionButton> buttons = List.of(
-                button("Внести ары", "Положить руду на счёт", WIDTH_SMALL,
+                button("Внести ары", "Положить руду на счёт", WIDTH_HALF,
                         DepositGui::open),
-                button("Забрать ары", "Снять руду со счёта", WIDTH_SMALL,
+                button("Забрать ары", "Снять руду со счёта", WIDTH_HALF,
                         this::withdrawDialog),
-                button("Создать контейнер", "Заказать ресурсы и оплатить", WIDTH_SMALL,
+                button("Создать контейнер", "Заказать ресурсы и оплатить", WIDTH_HALF,
                         this::pasteDialog),
                 button("Забрать контейнер", mine == 0 ? "Пока нет заказов" : "Заказов: " + mine,
-                        WIDTH_SMALL, this::containers),
-                button("СДАТЬ РЕСУРСЫ", "Отдать добытое и получить оплату", WIDTH_WIDE,
+                        WIDTH_HALF, this::containers),
+                button("СДАТЬ РЕСУРСЫ", "Отдать добытое и получить оплату", WIDTH_FULL,
                         SellGui::open));
 
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Биржа ресурсов", NamedTextColor.GOLD))
-                        .body(List.of(DialogBody.plainMessage(
+                        .body(List.of(message(
                                 Ui.text("На счету: " + Ui.money(balance) + " ар", NamedTextColor.GOLD))))
                         .afterAction(DialogBase.DialogAfterAction.CLOSE)
                         .build())
@@ -143,10 +160,11 @@ public final class Screens {
 
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Забрать ары", NamedTextColor.GOLD))
-                        .body(List.of(DialogBody.plainMessage(Ui.text(
+                        .body(List.of(message(Ui.text(
                                 "Доступно " + whole + " шт. Дробный остаток остаётся на счету."))))
                         .inputs(List.of(DialogInput.numberRange("ore",
                                         Ui.text("Руды", NamedTextColor.WHITE), 1, whole)
+                                .width(WIDTH_FULL)
                                 .initial((float) Math.min(whole, 64))
                                 .step(1f)
                                 .build()))
@@ -154,16 +172,14 @@ public final class Screens {
                         .build())
                 .type(DialogType.confirmation(
                         ActionButton.builder(Ui.text("Снять", NamedTextColor.GREEN))
+                                .width(WIDTH_HALF)
                                 .action(DialogAction.customClick((view, audience) -> {
                                     Float raw = view.getFloat("ore");
                                     int ore = raw == null ? 0 : Math.round(raw);
                                     later(player, () -> doWithdraw(player, ore));
                                 }, Ui.callback()))
                                 .build(),
-                        ActionButton.builder(Ui.text("← В меню", NamedTextColor.YELLOW))
-                                .action(DialogAction.customClick(
-                                        (view, audience) -> later(player, () -> mainMenu(player)), Ui.callback()))
-                                .build()))));
+                        button("← В меню", null, WIDTH_HALF, this::mainMenu)))));
     }
 
     private void doWithdraw(Player player, int ore) {
@@ -182,15 +198,15 @@ public final class Screens {
     public void depositResult(Player player, double ares) {
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Ары зачислены", NamedTextColor.GOLD))
-                        .body(List.of(DialogBody.plainMessage(Ui.text(
+                        .body(List.of(message(Ui.text(
                                 "Зачислено " + Ui.money(ares) + " ар. На счету: "
                                         + Ui.money(accounts.balance(player.getUniqueId())) + " ар.",
                                 NamedTextColor.GOLD))))
                         .afterAction(DialogBase.DialogAfterAction.CLOSE)
                         .build())
                 .type(DialogType.confirmation(
-                        button("Внести ещё", null, WIDTH_MEDIUM, DepositGui::open),
-                        button("← В меню", null, WIDTH_MEDIUM, this::mainMenu)))));
+                        button("Внести ещё", null, WIDTH_HALF, DepositGui::open),
+                        button("← В меню", null, WIDTH_HALF, this::mainMenu)))));
     }
 
     // ---------- сдача ресурсов ----------
@@ -201,10 +217,10 @@ public final class Screens {
      */
     public void sellResult(Player player, double earned, int stored) {
         List<DialogBody> body = new ArrayList<>();
-        body.add(DialogBody.plainMessage(Ui.text(
+        body.add(message(Ui.text(
                 "Начислено: " + Ui.money(earned) + " ар", NamedTextColor.GOLD)));
         if (stored > 0) {
-            body.add(DialogBody.plainMessage(Ui.text(
+            body.add(message(Ui.text(
                     stored + " шт. легли на склад — спроса на них пока нет. "
                             + "Оплата придёт сама, когда появится.", NamedTextColor.YELLOW)));
         }
@@ -216,10 +232,11 @@ public final class Screens {
                         .build())
                 .type(DialogType.confirmation(
                         ActionButton.builder(Ui.text("Сдать ещё", NamedTextColor.GREEN))
+                                .width(WIDTH_HALF)
                                 .action(DialogAction.customClick((view, audience) ->
                                         later(player, () -> SellGui.open(player)), Ui.callback()))
                                 .build(),
-                        button("← В меню", null, WIDTH_MEDIUM, this::mainMenu)))));
+                        button("← В меню", null, WIDTH_HALF, this::mainMenu)))));
     }
 
     // ---------- создание контейнера ----------
@@ -232,7 +249,7 @@ public final class Screens {
         List<ActionButton> buttons = new ArrayList<>();
         buttons.add(ActionButton.builder(Ui.text("Оплатить", NamedTextColor.GREEN))
                 .tooltip(Ui.text("Прочитать список и показать итоговую цену"))
-                .width(WIDTH_WIDE)
+                .width(WIDTH_HALF)
                 .action(DialogAction.customClick((view, audience) -> {
                     String name = view.getText("name");
                     String raw = view.getText("list");
@@ -242,36 +259,42 @@ public final class Screens {
         if (!calculatorUrl.isEmpty()) {
             buttons.add(ActionButton.builder(Ui.text("Калькулятор", NamedTextColor.AQUA))
                     .tooltip(Ui.text("Посчитать список на сайте и скопировать его"))
-                    .width(WIDTH_WIDE)
+                    .width(WIDTH_HALF)
                     .action(DialogAction.staticAction(ClickEvent.openUrl(calculatorUrl)))
                     .build());
         }
-        buttons.add(button("← В меню", null, WIDTH_MEDIUM, this::mainMenu));
+        // Две кнопки в ряд экономят строку: поле списка высокое, и с тремя кнопками
+        // в столбик нижняя уезжала за край экрана. Без калькулятора «в меню» встаёт парой.
+        buttons.add(button("← В меню", null, calculatorUrl.isEmpty() ? WIDTH_HALF : WIDTH_FULL,
+                this::mainMenu));
 
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Создать контейнер", NamedTextColor.GOLD))
-                        .body(List.of(DialogBody.plainMessage(Ui.text(
-                                "Вставьте список: по строке на ресурс, название и количество.\n"
+                        // Каждая строка короче ширины диалога: длинные клиент переносит
+                        // посреди фразы, и текст рассыпается лесенкой.
+                        .body(List.of(message(Ui.text(
+                                "Вставьте список: по строке на ресурс.\n"
                                         + "Например «STONE 3000» или «oak_planks 12s» (s — стаки).\n"
-                                        + "Ниже назовите заказ, чтобы отличать его от других — например «Храм»."))))
-                        // Список первым: клиент рисует счётчик символов под многострочным полем поверх
-                        // того, что ниже. Под ним должна быть подпись поля (она слева, счётчик справа),
-                        // а не кнопка «Оплатить» во всю ширину.
+                                        + "Под списком — название, чтобы отличать заказы."))))
+                        // Список стоит первым не случайно. Под многострочным полем клиент
+                        // всегда пишет счётчик символов и места под него не оставляет:
+                        // будь поле последним, счётчик лёг бы на кнопки. А так под ним
+                        // подпись «Название» — она слева, счётчик справа, они не сталкиваются.
                         .inputs(List.of(
                                 DialogInput.text("list", Ui.text("Список", NamedTextColor.WHITE))
                                         .maxLength(MAX_PASTE_LENGTH)
-                                        .width(300)
+                                        .width(WIDTH_FULL)
                                         .multiline(TextDialogInput.MultilineOptions.create(
-                                                MAX_PASTE_LINES, 260))
+                                                MAX_PASTE_LINES, PASTE_HEIGHT))
                                         .build(),
                                 DialogInput.text("name", Ui.text("Название", NamedTextColor.WHITE))
                                         .initial(cartOf(player).title())
                                         .maxLength(Container.MAX_NAME)
-                                        .width(300)
+                                        .width(WIDTH_FULL)
                                         .build()))
                         .afterAction(DialogBase.DialogAfterAction.CLOSE)
                         .build())
-                .type(DialogType.multiAction(buttons).columns(1).build())));
+                .type(DialogType.multiAction(buttons).columns(2).build())));
     }
 
     private void applyPastedList(Player player, String name, String raw) {
@@ -310,9 +333,10 @@ public final class Screens {
     public void searchDialog(Player player, CatalogGui catalog) {
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Поиск ресурса", NamedTextColor.AQUA))
-                        .body(List.of(DialogBody.plainMessage(Ui.text(
+                        .body(List.of(message(Ui.text(
                                 "Часть названия: камень, доски, STONE или oak."))))
                         .inputs(List.of(DialogInput.text("query", Ui.text("Запрос", NamedTextColor.WHITE))
+                                .width(WIDTH_FULL)
                                 .initial(catalog.filterText())
                                 .maxLength(48)
                                 .build()))
@@ -320,7 +344,7 @@ public final class Screens {
                         .build())
                 .type(DialogType.multiAction(List.of(
                                 ActionButton.builder(Ui.text("Искать", NamedTextColor.GREEN))
-                                        .width(WIDTH_MEDIUM)
+                                        .width(WIDTH_HALF)
                                         .action(DialogAction.customClick((view, audience) -> {
                                             String query = view.getText("query");
                                             later(player, () -> {
@@ -329,9 +353,9 @@ public final class Screens {
                                             });
                                         }, Ui.callback()))
                                         .build(),
-                                button("← В каталог", null, WIDTH_MEDIUM,
+                                button("← В каталог", null, WIDTH_HALF,
                                         p -> catalog.open(p))))
-                        .columns(1)
+                        .columns(2)
                         .build())));
     }
 
@@ -348,12 +372,13 @@ public final class Screens {
                                 DialogBody.item(new ItemStack(material))
                                         .description(DialogBody.plainMessage(Ui.text(
                                                 Ui.money(type.pricePerStack()) + " ар за стак",
-                                                NamedTextColor.GOLD)))
+                                                NamedTextColor.GOLD), ITEM_TEXT_WIDTH))
                                         .build(),
-                                DialogBody.plainMessage(Ui.text(
+                                message(Ui.text(
                                         "Сколько штук заказать? Ноль уберёт позицию."))))
                         .inputs(List.of(DialogInput.text("amount",
                                         Ui.text("Количество", NamedTextColor.WHITE))
+                                .width(WIDTH_FULL)
                                 .initial(String.valueOf(current))
                                 .maxLength(6)
                                 .build()))
@@ -361,15 +386,13 @@ public final class Screens {
                         .build())
                 .type(DialogType.confirmation(
                         ActionButton.builder(Ui.text("Записать", NamedTextColor.GREEN))
+                                .width(WIDTH_HALF)
                                 .action(DialogAction.customClick((view, audience) -> {
                                     String raw = view.getText("amount");
                                     later(player, () -> applyAmount(player, material, raw));
                                 }, Ui.callback()))
                                 .build(),
-                        ActionButton.builder(Ui.text("← В каталог", NamedTextColor.YELLOW))
-                                .action(DialogAction.customClick((view, audience) ->
-                                        later(player, () -> catalogFor(player).open(player)), Ui.callback()))
-                                .build()))));
+                        button("← В каталог", null, WIDTH_HALF, p -> catalogFor(p).open(p))))));
     }
 
     private void applyAmount(Player player, Material material, String raw) {
@@ -408,19 +431,19 @@ public final class Screens {
                             .append(Ui.name(line.getKey()))
                             .append(Ui.text(" — " + line.getValue() + " шт. за "
                                     + Ui.money(cost) + " ар", NamedTextColor.GRAY))
-                            .build()))
+                            .build(), ITEM_TEXT_WIDTH))
                     .build());
         }
         if (cart.size() > MAX_LINES_IN_DIALOG) {
-            body.add(DialogBody.plainMessage(Ui.text(
+            body.add(message(Ui.text(
                     "…и ещё " + (cart.size() - MAX_LINES_IN_DIALOG) + " позиций.")));
         }
-        body.add(DialogBody.plainMessage(Ui.text(
+        body.add(message(Ui.text(
                 "Позиций: " + cart.size() + ". Итого: " + Ui.money(total)
                         + " ар. На счету: " + Ui.money(balance) + " ар.",
                 total <= balance ? NamedTextColor.GOLD : NamedTextColor.RED)));
         if (total > balance) {
-            body.add(DialogBody.plainMessage(Ui.text(
+            body.add(message(Ui.text(
                     "Не хватает " + Ui.money(total - balance) + " ар.", NamedTextColor.RED)));
         }
 
@@ -433,16 +456,16 @@ public final class Screens {
                         .build())
                 .type(DialogType.multiAction(List.of(
                                 ActionButton.builder(Ui.text("Подтвердить оплату", NamedTextColor.GREEN))
-                                        .width(WIDTH_WIDE)
+                                        .width(WIDTH_FULL)
                                         .action(DialogAction.customClick((view, audience) ->
                                                 later(player, () -> payCart(player)), Ui.callback()))
                                         .build(),
-                                button("Очистить заказ", "Убрать все позиции", WIDTH_MEDIUM,
+                                button("Очистить заказ", "Убрать все позиции", WIDTH_FULL,
                                         p -> {
                                             cartOf(p).clear();
                                             mainMenu(p);
                                         }),
-                                button("← В меню", "Заказ останется набранным", WIDTH_MEDIUM,
+                                button("← В меню", "Заказ останется набранным", WIDTH_FULL,
                                         this::mainMenu)))
                         .columns(1)
                         .build())));
@@ -487,14 +510,18 @@ public final class Screens {
             String hint = market.isEmptyForOwner(container)
                     ? "собрано " + percent + "%, забирать пока нечего"
                     : "собрано " + percent + "%, есть что забрать";
-            buttons.add(button(container.label() + " — " + percent + "%", hint,
-                    WIDTH_WIDE, p -> containerDetail(p, container.id())));
+            String suffix = container.status() == Container.Status.CANCELLED
+                    ? " — отменён"
+                    : " — " + percent + "%";
+            String name = Ui.fit(container.label(), WIDTH_FULL - BUTTON_PADDING - Ui.width(suffix));
+            buttons.add(button(name + suffix, hint,
+                    WIDTH_FULL, p -> containerDetail(p, container.id())));
         }
-        buttons.add(button("← В меню", null, WIDTH_MEDIUM, this::mainMenu));
+        buttons.add(button("← В меню", null, WIDTH_FULL, this::mainMenu));
 
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Мои контейнеры", NamedTextColor.GOLD))
-                        .body(List.of(DialogBody.plainMessage(Ui.text(
+                        .body(List.of(message(Ui.text(
                                 "Заказов: " + mine.size() + ". Выберите нужный."))))
                         .afterAction(DialogBase.DialogAfterAction.CLOSE)
                         .build())
@@ -521,15 +548,15 @@ public final class Screens {
                             .append(Ui.name(entry.getKey()))
                             .append(Ui.text(" — " + line.collected() + "/" + line.requested() + ready,
                                     NamedTextColor.GRAY))
-                            .build()))
+                            .build(), ITEM_TEXT_WIDTH))
                     .build());
         }
         if (container.lines().size() > MAX_LINES_IN_DIALOG) {
-            body.add(DialogBody.plainMessage(Ui.text(
+            body.add(message(Ui.text(
                     "…и ещё " + (container.lines().size() - MAX_LINES_IN_DIALOG) + " позиций.")));
         }
         boolean cancelled = container.status() == Container.Status.CANCELLED;
-        body.add(DialogBody.plainMessage(Ui.text("Собрано " + progressPercent(container) + "%"
+        body.add(message(Ui.text("Собрано " + progressPercent(container) + "%"
                 + (cancelled ? " · заказ отменён, спроса по нему больше нет" : ""))));
 
         // Кнопку «Открыть» показываем всегда, даже если забирать пока нечего: заглянуть
@@ -538,12 +565,12 @@ public final class Screens {
         List<ActionButton> buttons = new ArrayList<>();
         buttons.add(button("Открыть контейнер",
                 empty ? "Пока пусто — можно просто заглянуть" : "Забрать собранное",
-                WIDTH_WIDE, p -> new WithdrawGui(this, container).open(p)));
+                WIDTH_FULL, p -> new WithdrawGui(this, container).open(p)));
         if (!cancelled) {
-            buttons.add(button("Отменить заказ", "Вернуть ары за несобранное", WIDTH_MEDIUM,
+            buttons.add(button("Отменить заказ", "Вернуть ары за несобранное", WIDTH_FULL,
                     p -> cancelDialog(p, container)));
         }
-        buttons.add(button("← В меню", null, WIDTH_MEDIUM, this::mainMenu));
+        buttons.add(button("← В меню", null, WIDTH_FULL, this::mainMenu));
 
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text(container.label(), NamedTextColor.GOLD))
@@ -565,21 +592,18 @@ public final class Screens {
 
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Отменить заказ?", NamedTextColor.RED))
-                        .body(List.of(DialogBody.plainMessage(Ui.text(
-                                "Вернётся " + Ui.money(amount) + " ар за несобранное. "
-                                        + "Уже собранное останется — его можно будет забрать."))))
+                        .body(List.of(message(Ui.text(
+                                "Вернётся " + Ui.money(amount) + " ар за несобранное.\n"
+                                        + "Собранное останется — его можно будет забрать."))))
                         .afterAction(DialogBase.DialogAfterAction.CLOSE)
                         .build())
                 .type(DialogType.confirmation(
                         ActionButton.builder(Ui.text("Отменить и вернуть", NamedTextColor.RED))
+                                .width(WIDTH_HALF)
                                 .action(DialogAction.customClick((view, audience) ->
                                         later(player, () -> doCancel(player, container)), Ui.callback()))
                                 .build(),
-                        ActionButton.builder(Ui.text("Оставить", NamedTextColor.YELLOW))
-                                .action(DialogAction.customClick((view, audience) ->
-                                        later(player, () -> containerDetail(player, container.id())),
-                                        Ui.callback()))
-                                .build()))));
+                        button("Оставить", null, WIDTH_HALF, p -> containerDetail(p, container.id()))))));
     }
 
     private void doCancel(Player player, Container container) {
@@ -603,7 +627,7 @@ public final class Screens {
 
     /** Простое сообщение с возвратом в меню. */
     public void notice(Player player, String title, String message) {
-        notice(player, title, message, "В меню", this::mainMenu);
+        notice(player, title, message, "← В меню", this::mainMenu);
     }
 
     /** То же, но возвращает туда, откуда игрок пришёл, — например обратно к контейнерам. */
@@ -611,10 +635,10 @@ public final class Screens {
                        String backLabel, Consumer<Player> back) {
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text(title, NamedTextColor.GOLD))
-                        .body(List.of(DialogBody.plainMessage(Ui.text(message, NamedTextColor.WHITE))))
+                        .body(List.of(message(Ui.text(message, NamedTextColor.WHITE))))
                         .afterAction(DialogBase.DialogAfterAction.CLOSE)
                         .build())
-                .type(DialogType.notice(button(backLabel, null, WIDTH_MEDIUM, back)))));
+                .type(DialogType.notice(button(backLabel, null, WIDTH_HALF, back)))));
     }
 
     /**
@@ -622,7 +646,8 @@ public final class Screens {
      * не держит ссылку на того, кто её строил.
      */
     private ActionButton button(String label, String tooltip, int width, Consumer<Player> onClick) {
-        ActionButton.Builder builder = ActionButton.builder(Ui.text(label, NamedTextColor.WHITE))
+        ActionButton.Builder builder = ActionButton
+                .builder(Ui.text(Ui.fit(label, width - BUTTON_PADDING), NamedTextColor.WHITE))
                 .width(width)
                 .action(DialogAction.customClick((view, audience) -> {
                     if (audience instanceof Player player) {
@@ -633,6 +658,11 @@ public final class Screens {
             builder.tooltip(Ui.text(tooltip));
         }
         return builder.build();
+    }
+
+    /** Текст диалога во всю ширину — вровень с кнопками и полями ввода. */
+    private static DialogBody message(Component text) {
+        return DialogBody.plainMessage(text, WIDTH_FULL);
     }
 
     private void show(Player player, Dialog dialog) {

@@ -16,9 +16,12 @@ import java.util.Map;
  */
 public final class CatalogGui extends PagedGui {
 
-    private static final int SLOT_SEARCH = 47;
-    private static final int SLOT_CART = 48;
-    private static final int SLOT_CLEAR = 51;
+    // Нижний ряд симметричен относительно центра: листалки по краям,
+    // поиск и очистка через одну от них, «в меню» и контейнер вплотную к середине.
+    private static final int SLOT_SEARCH = 46;
+    private static final int SLOT_BACK_HERE = 48;
+    private static final int SLOT_CART = 50;
+    private static final int SLOT_CLEAR = 52;
 
     private final Screens screens;
     private final Cart cart;
@@ -133,6 +136,11 @@ public final class CatalogGui extends PagedGui {
                             cart.clear();
                             refresh();
                         }));
+    }
+
+    @Override
+    protected int backSlot() {
+        return SLOT_BACK_HERE;
     }
 
     @Override

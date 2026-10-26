@@ -144,7 +144,7 @@ public final class StandView {
 
         header.text(Ui.text(content.title(), NamedTextColor.GOLD));
         footer.text(rows.isEmpty()
-                ? Ui.text("заказов сейчас нет", NamedTextColor.DARK_GRAY)
+                ? Ui.text("заказов сейчас нет", NamedTextColor.GRAY)
                 : Ui.text((offset + 1) + "–" + Math.min(rows.size(), offset + layout.rows())
                         + " из " + rows.size() + "   ·   колесо мыши", NamedTextColor.GRAY));
         paintHover();
