@@ -1,6 +1,7 @@
 package org.webtrade.webTrade.ui;
 
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -33,6 +34,12 @@ public abstract class PagedGui implements InventoryHolder {
     protected static final int SLOT_NEXT = 53;
     protected static final int SLOT_PAGE = 50;
 
+    /**
+     * Сколько пикселей заголовка помещается в сундук: окно шириной 176, текст начинается
+     * с отступа 8 и до правого края должен не дойти. Длиннее — наползёт на рамку.
+     */
+    public static final int TITLE_WIDTH = 160;
+
     /** Строка меню: как выглядит и что делает по клику. */
     public record Entry(org.bukkit.inventory.ItemStack icon, BiConsumer<Player, ClickType> onClick) {
 
@@ -61,13 +68,18 @@ public abstract class PagedGui implements InventoryHolder {
         player.closeInventory();
     }
 
+    /** Где стоит кнопка возврата. Меню с несколькими своими кнопками может её сдвинуть. */
+    protected int backSlot() {
+        return SLOT_BACK;
+    }
+
     protected Component backLabel() {
         return Ui.text("Закрыть", NamedTextColor.RED);
     }
 
     public void open(Player player) {
         if (inventory == null) {
-            inventory = Bukkit.createInventory(this, SIZE, title());
+            inventory = Bukkit.createInventory(this, SIZE, fittedTitle());
         }
         render();
         player.openInventory(inventory);
@@ -97,15 +109,15 @@ public abstract class PagedGui implements InventoryHolder {
 
         if (page > 0) {
             inventory.setItem(SLOT_PREV, Ui.icon(Material.ARROW,
-                    Ui.text("← Назад", NamedTextColor.YELLOW),
+                    Ui.text("← Предыдущая", NamedTextColor.YELLOW),
                     List.of(Ui.text("Страница " + page + " из " + pages))));
         }
         if (page < pages - 1) {
             inventory.setItem(SLOT_NEXT, Ui.icon(Material.ARROW,
-                    Ui.text("Вперёд →", NamedTextColor.YELLOW),
+                    Ui.text("Следующая →", NamedTextColor.YELLOW),
                     List.of(Ui.text("Страница " + (page + 2) + " из " + pages))));
         }
-        inventory.setItem(SLOT_BACK, Ui.icon(Material.BARRIER, backLabel(), List.of()));
+        inventory.setItem(backSlot(), Ui.icon(Material.BARRIER, backLabel(), List.of()));
         if (pages > 1) {
             inventory.setItem(SLOT_PAGE, Ui.icon(Material.PAPER, page + 1,
                     Ui.text("Страница " + (page + 1) + " из " + pages, NamedTextColor.WHITE),
@@ -137,24 +149,30 @@ public abstract class PagedGui implements InventoryHolder {
             extra.onClick().accept(player, click);
             return;
         }
-        switch (rawSlot) {
-            case SLOT_PREV -> {
-                page--;
-                render();
-            }
-            case SLOT_NEXT -> {
-                page++;
-                render();
-            }
-            case SLOT_BACK -> onBack(player);
-            default -> { }
+        if (rawSlot == backSlot()) {
+            onBack(player);
+        } else if (rawSlot == SLOT_PREV && page > 0) {
+            page--;
+            render();
+        } else if (rawSlot == SLOT_NEXT) {
+            page++;
+            render();
         }
+    }
+
+    /** Заголовок, обрезанный под ширину сундука, — длинное название заказа иначе вылезает за рамку. */
+    private Component fittedTitle() {
+        Component title = title();
+        if (title instanceof TextComponent text && text.children().isEmpty()) {
+            return text.content(Ui.fit(text.content(), TITLE_WIDTH));
+        }
+        return title;
     }
 
     @Override
     public @NotNull Inventory getInventory() {
         if (inventory == null) {
-            inventory = Bukkit.createInventory(this, SIZE, title());
+            inventory = Bukkit.createInventory(this, SIZE, fittedTitle());
         }
         return inventory;
     }

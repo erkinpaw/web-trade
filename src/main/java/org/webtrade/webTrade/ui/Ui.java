@@ -66,6 +66,48 @@ public final class Ui {
         return stack;
     }
 
+    /**
+     * Ширина строки в пикселях стандартного шрифта. Таблица снята с глифов клиента 26.3:
+     * почти все буквы, латиница и кириллица, занимают 6 пикселей, здесь только исключения.
+     * Незнакомые символы считаем по 8 — лучше недооценить место, чем вылезти за кнопку.
+     */
+    public static int width(String value) {
+        int total = 0;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            total += switch (c) {
+                case '!', '\'', ',', '.', ':', ';', 'i', '|', '·' -> 2;
+                case '`', 'l' -> 3;
+                case ' ', '"', '(', ')', '*', 'I', '[', ']', 't', '{', '}' -> 4;
+                case '<', '>', 'f', 'k', 'г', 'к' -> 5;
+                case '@', '~', 'Д', 'Ц', 'Ъ', 'д', 'щ', 'ъ', 'ы', '✔', '«', '»' -> 7;
+                case 'Ж', 'Ф', 'Ш', 'Ы', 'Ю', 'ю', '←', '→', '…' -> 8;
+                case 'Щ', '—' -> 9;
+                default -> c < 0x7F || (c >= 'А' && c <= 'я') || c == 'Ё' || c == 'ё' ? 6 : 8;
+            };
+        }
+        return total;
+    }
+
+    /** Обрезает строку с многоточием, чтобы она уложилась в заданную ширину. */
+    public static String fit(String value, int maxWidth) {
+        if (width(value) <= maxWidth) {
+            return value;
+        }
+        int budget = maxWidth - width("…");
+        StringBuilder out = new StringBuilder();
+        int used = 0;
+        for (int i = 0; i < value.length(); i++) {
+            int next = width(String.valueOf(value.charAt(i)));
+            if (used + next > budget) {
+                break;
+            }
+            out.append(value.charAt(i));
+            used += next;
+        }
+        return out.toString().stripTrailing() + "…";
+    }
+
     /** Тёмная заглушка для пустых мест: без подсказки, чтобы наведение не показывало пустую рамку. */
     public static ItemStack filler() {
         ItemStack stack = icon(Material.BLACK_STAINED_GLASS_PANE, Component.empty(), List.of());

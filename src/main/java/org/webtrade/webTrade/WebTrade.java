@@ -9,6 +9,7 @@ import org.webtrade.webTrade.assets.CalculatorAssets;
 import org.webtrade.webTrade.account.JoinListener;
 import org.webtrade.webTrade.command.CalculatorCommand;
 import org.webtrade.webTrade.command.RemoteAccess;
+import org.webtrade.webTrade.command.OpenCommand;
 import org.webtrade.webTrade.command.ScreenCommand;
 import org.webtrade.webTrade.command.WithdrawCommand;
 import org.webtrade.webTrade.currency.CurrencyListener;
@@ -31,7 +32,10 @@ import org.webtrade.webTrade.ui.Ui;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 public final class WebTrade extends JavaPlugin {
 
@@ -99,6 +103,17 @@ public final class WebTrade extends JavaPlugin {
                 new StockGui(screens, player.getUniqueId()).open(player)));
         command("tradestand", new StandCommand(stands));
         command("tradecalc", new CalculatorCommand(this, resources));
+        // Порядок ключей — порядок в подсказке команды.
+        Map<String, Consumer<Player>> openable = new LinkedHashMap<>();
+        openable.put("menu", screens::mainMenu);
+        openable.put("create", screens::pasteDialog);
+        openable.put("containers", screens::containers);
+        openable.put("deposit", DepositGui::open);
+        openable.put("withdraw", screens::withdrawDialog);
+        openable.put("sell", SellGui::open);
+        openable.put("demand", player -> new DemandGui(screens).open(player));
+        openable.put("stock", player -> new StockGui(screens, player.getUniqueId()).open(player));
+        command("tradeopen", new OpenCommand(this, openable));
 
         exportCalculator(config.getBoolean("calculator.export-on-start", true));
 
