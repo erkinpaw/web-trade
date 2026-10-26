@@ -42,7 +42,7 @@ public final class StandManager implements Listener {
     private static final int TASK_PERIOD = 4;
     private static final long CLICK_COOLDOWN_MS = 500;
     /** Через сколько тишины после последнего щелчка колеса хотбар возвращается на место. */
-    private static final long SCROLL_SETTLE_MS = 250;
+    private static final long SCROLL_SETTLE_MS = 400;
 
     private static final int DEFAULT_ROWS = BoardLayout.DEFAULT_ROWS;
 
@@ -57,6 +57,8 @@ public final class StandManager implements Listener {
     /** Серия прокрутки колесом: слот, с которого игрок начал, и время последнего щелчка. */
     private final Map<UUID, Integer> scrollHome = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<UUID, Long> lastScroll = new java.util.concurrent.ConcurrentHashMap<>();
+    /** В какую сторону игрок крутит в этой серии: +1 вниз по списку, -1 вверх. */
+    private final Map<UUID, Integer> scrollDirection = new java.util.concurrent.ConcurrentHashMap<>();
 
     private io.papermc.paper.threadedregions.scheduler.ScheduledTask task;
     /** Счётчик тиков: цифры на стенде обновляем реже, чем следим за подходом игроков. */
@@ -219,9 +221,11 @@ public final class StandManager implements Listener {
         // строк раньше съедали щелчки колеса, и прокрутка шла рывками.
         if (view.layout().look(player.getEyeLocation(), player.getEyeLocation().getDirection(), LOOK_DISTANCE) == null) {
             scrollHome.remove(player.getUniqueId()); // отвернулся и сам выбирает слот — не перебиваем
+            scrollDirection.remove(player.getUniqueId());
             return;
         }
 
+        UUID id = player.getUniqueId();
         int previous = event.getPreviousSlot();
         int delta = event.getNewSlot() - previous;
         // Хотбар закольцован: переход 8→0 это шаг вперёд, а не восемь шагов назад.
@@ -233,9 +237,17 @@ public final class StandManager implements Listener {
         if (delta == 0) {
             return;
         }
+        // Клиент шлёт слот раз в тик, только итог. Сильный рывок колеса — 5–8 щелчков за тик — по
+        // кругу из 9 слотов выглядит короче в обратную сторону (6 вниз = 3 вверх), и список отскакивал
+        // назад. Внутри серии игрок крутит в одну сторону: такой скачок считаем в её направлении.
+        Integer direction = scrollDirection.get(id);
+        if (direction != null && Integer.signum(delta) != direction) {
+            delta += 9 * direction;
+        } else if (direction == null) {
+            scrollDirection.put(id, Integer.signum(delta));
+        }
 
         view.scroll(delta);
-        UUID id = player.getUniqueId();
         boolean burstStarted = scrollHome.putIfAbsent(id, previous) == null;
         lastScroll.put(id, System.currentTimeMillis());
         if (burstStarted) {
@@ -254,6 +266,7 @@ public final class StandManager implements Listener {
             }
             Integer home = scrollHome.remove(id);
             lastScroll.remove(id);
+            scrollDirection.remove(id);
             if (home != null && player.isOnline()) {
                 player.getInventory().setHeldItemSlot(home);
             }
@@ -264,6 +277,7 @@ public final class StandManager implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         scrollHome.remove(event.getPlayer().getUniqueId());
         lastScroll.remove(event.getPlayer().getUniqueId());
+        scrollDirection.remove(event.getPlayer().getUniqueId());
         StandView view = views.remove(event.getPlayer().getUniqueId());
         if (view != null) {
             view.despawn();
