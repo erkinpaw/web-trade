@@ -127,21 +127,36 @@ public final class Screens {
         // последней: при нечётном числе кнопок последняя остаётся одна в ряду.
         // Отсюда раскладка «пара / пара / широкая», а не «пара / широкая / пара».
         List<ActionButton> buttons = List.of(
-                button("Внести ары", "Положить руду на счёт", WIDTH_HALF,
+                button("Внести ары", "Положи алмазную глубинносланцевую руду — "
+                                + "каждая руда превращается в ары на твоём счёте. Ары нужны, "
+                                + "чтобы оплачивать заказы.", WIDTH_HALF,
                         DepositGui::open),
-                button("Забрать ары", "Снять руду со счёта", WIDTH_HALF,
+                button("Забрать ары", "Обменять ары обратно на алмазную глубинносланцевую руду "
+                                + "и получить её в инвентарь.", WIDTH_HALF,
                         this::withdrawDialog),
-                button("Создать контейнер", "Заказать ресурсы и оплатить", WIDTH_HALF,
+                button("Создать контейнер", "Заказать ресурсы (можно списком из калькулятора на сайте). "
+                                + "Ары списываются сразу, другие игроки собирают заказ, "
+                                + "а ты потом забираешь готовое.", WIDTH_HALF,
                         this::pasteDialog),
-                button("Забрать контейнер", mine == 0 ? "Пока нет заказов" : "Заказов: " + mine,
+                button("Забрать контейнер", (mine == 0 ? "Заказов пока нет. " : "Твоих заказов: " + mine + ". ")
+                                + "Здесь видно, что уже собрано: забирай готовое, "
+                                + "а несобранное можно отменить и вернуть ары.",
                         WIDTH_HALF, this::containers),
-                button("СДАТЬ РЕСУРСЫ", "Отдать добытое и получить оплату", WIDTH_FULL,
+                button("СДАТЬ РЕСУРСЫ", "Положи добытое — то, что кто-то заказал, сразу "
+                                + "оплачивается арами. Остальное ждёт на складе, пока не появится спрос. "
+                                + "Зачарованные и переименованные вещи не принимаются.", WIDTH_FULL,
                         SellGui::open));
 
         show(player, Dialog.create(builder -> builder.empty()
                 .base(DialogBase.builder(Ui.text("Биржа ресурсов", NamedTextColor.GOLD))
-                        .body(List.of(message(
-                                Ui.text("На счету: " + Ui.money(balance) + " ар", NamedTextColor.GOLD))))
+                        .body(List.of(
+                                message(Ui.text("Здесь игроки торгуют ресурсами. Нужны ресурсы — закажи их "
+                                        + "в контейнере и оплати арами. Есть лишнее добытое — сдай его "
+                                        + "и получи ары. Ары — это алмазная глубинносланцевая руда на счету.",
+                                        NamedTextColor.GRAY)),
+                                message(Ui.text("Наведи на кнопку — увидишь подробности.",
+                                        NamedTextColor.DARK_GRAY)),
+                                message(Ui.text("На счету: " + Ui.money(balance) + " ар", NamedTextColor.GOLD))))
                         .afterAction(DialogBase.DialogAfterAction.CLOSE)
                         .build())
                 .type(DialogType.multiAction(buttons).columns(2).build())));

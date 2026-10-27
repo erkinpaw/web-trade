@@ -34,8 +34,10 @@ import java.util.UUID;
 public final class StandManager implements Listener {
 
     /** Радиус появления и радиус исчезновения разные, иначе стенд мигает на границе. */
-    private static final double SHOW_RADIUS = 10.0;
-    private static final double HIDE_RADIUS = 14.0;
+    private static final double SHOW_RADIUS = 26.0;
+    private static final double HIDE_RADIUS = 32.0;
+    /** Другой стенд должен быть ближе хотя бы на столько, чтобы показ переключился на него. */
+    private static final double SWITCH_MARGIN = 4.0;
     /** Как далеко ищем сущность, на которую смотрит игрок. */
     private static final int LOOK_DISTANCE = 8;
     /** Подсветку строки под взглядом обновляем часто, иначе она отстаёт от мыши. */
@@ -122,9 +124,18 @@ public final class StandManager implements Listener {
                 }
                 return;
             }
-            if (nearest(player.getLocation(), HIDE_RADIUS) == null) {
+            if (!view.layout().inRange(player.getLocation(), HIDE_RADIUS)) {
                 view.despawn();
                 views.remove(player.getUniqueId());
+                return;
+            }
+            // Радиус большой, стенды стоят рядом: подошёл к другому — показываем его.
+            if (nearby != null && nearby != view.layout()
+                    && distance(nearby, player) + SWITCH_MARGIN < distance(view.layout(), player)) {
+                view.despawn();
+                StandView fresh = new StandView(plugin, nearby, player, content, this::assets);
+                views.put(player.getUniqueId(), fresh);
+                fresh.spawn();
                 return;
             }
             view.hover(lookedRow(player, view));
@@ -146,12 +157,23 @@ public final class StandManager implements Listener {
     }
 
     private BoardLayout nearest(Location where, double radius) {
+        BoardLayout best = null;
+        double bestDistance = Double.MAX_VALUE;
         for (BoardLayout stand : stands) {
             if (stand.inRange(where, radius)) {
-                return stand;
+                double d = stand.anchor().distanceSquared(where);
+                if (d < bestDistance) {
+                    bestDistance = d;
+                    best = stand;
+                }
             }
         }
-        return null;
+        return best;
+    }
+
+    private static double distance(BoardLayout stand, Player player) {
+        return stand.anchor().getWorld().equals(player.getWorld())
+                ? stand.anchor().distance(player.getLocation()) : Double.MAX_VALUE;
     }
 
     // ---------- ввод ----------
