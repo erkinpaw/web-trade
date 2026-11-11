@@ -475,7 +475,7 @@ public final class MarketManager {
             });
         }
         try {
-            yaml.save(containersFile);
+            org.webtrade.webTrade.SafeFiles.save(yaml, containersFile);
         } catch (IOException e) {
             logger.severe("Не удалось сохранить containers.yml: " + e.getMessage());
         }
@@ -519,7 +519,7 @@ public final class MarketManager {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("entries", entries);
         try {
-            yaml.save(warehouseFile);
+            org.webtrade.webTrade.SafeFiles.save(yaml, warehouseFile);
         } catch (IOException e) {
             logger.severe("Не удалось сохранить warehouse.yml: " + e.getMessage());
         }

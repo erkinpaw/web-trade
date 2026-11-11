@@ -32,10 +32,15 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
     private static final double CAPTIONS_ROW = 1.0;
     private static final double HEADER_ROW = 1.9;
     private static final double FOOTER_ROW = -0.85;
-    private static final double MENU_ROW = -1.75;
+    private static final double MENU_ROW = -1.95;
+    private static final double RULE_ROW = 1.62;
+    static final double SCROLL_X = 2.72;
+    /** Кнопка «Меню»: размеры в блоках. */
+    static final double MENU_WIDTH = 1.9;
+    static final double MENU_HEIGHT = 0.36;
     /** Полоса строки начинается чуть ниже её текста: текст висит от точки вверх. */
     private static final double ROW_STRIP_FROM = -0.5;
-    private static final double PANEL_BOTTOM = -2.6;
+    private static final double PANEL_BOTTOM = -2.9;
     private static final double PANEL_TOP_MARGIN = 1.6;
 
     public static BoardLayout of(Location anchor, int rows) {
@@ -123,7 +128,27 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
     }
 
     public double panelWidth() {
-        return width + 1.3;
+        return width + 0.9;
+    }
+
+    /** Тонкая линия под заголовком: её низ. */
+    public Location rule() {
+        return at(0, rows - 1 + RULE_ROW);
+    }
+
+    /** Низ полосы прокрутки у правого края; сама полоса идёт вверх на все строки. */
+    public Location scrollTrack() {
+        return at(SCROLL_X, ROW_STRIP_FROM);
+    }
+
+    public double scrollHeight() {
+        return rows * rowHeight;
+    }
+
+    /** Смотрит ли игрок на кнопку «Меню» (сдвиг вбок и высота — как их отдаёт {@link #look}). */
+    public boolean onMenu(double side, double level) {
+        return Math.abs(side) <= MENU_WIDTH / 2
+                && Math.abs(level - MENU_ROW) * rowHeight <= MENU_HEIGHT / 2;
     }
 
     public double panelHeight() {

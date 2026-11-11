@@ -138,7 +138,9 @@ public final class StandManager implements Listener {
                 fresh.spawn();
                 return;
             }
-            view.hover(lookedRow(player, view));
+            double[] at = view.layout().look(player.getEyeLocation(), player.getEyeLocation().getDirection(), LOOK_DISTANCE);
+            view.hover(at == null ? -1 : view.layout().rowAt(at[1]));
+            view.hoverMenu(at != null && view.layout().onMenu(at[0], at[1]));
             // Спрос меняется от чужих сделок — раз в две секунды освежаем цифры сами.
             if (refresh) {
                 view.refresh();
@@ -215,12 +217,6 @@ public final class StandManager implements Listener {
         long now = System.currentTimeMillis();
         Long last = lastClick.put(player.getUniqueId(), now);
         return last == null || now - last >= CLICK_COOLDOWN_MS;
-    }
-
-    /** Строка, на которую игрок смотрит (-1 — мимо списка). Считается геометрически, без хитбоксов. */
-    private static int lookedRow(Player player, StandView view) {
-        double[] at = view.layout().look(player.getEyeLocation(), player.getEyeLocation().getDirection(), LOOK_DISTANCE);
-        return at == null ? -1 : view.layout().rowAt(at[1]);
     }
 
     /**
@@ -392,7 +388,7 @@ public final class StandManager implements Listener {
             yaml.set(base + ".width", stand.width());
         }
         try {
-            yaml.save(file);
+            org.webtrade.webTrade.SafeFiles.save(yaml, file);
         } catch (IOException e) {
             plugin.getLogger().severe("Не удалось сохранить stands.yml: " + e.getMessage());
         }
