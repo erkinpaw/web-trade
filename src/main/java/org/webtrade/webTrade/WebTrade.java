@@ -132,20 +132,50 @@ public final class WebTrade extends JavaPlugin {
         if (stands != null) {
             stands.stop();
         }
-        // Если у кого-то открыто окно депозита — рассчитаться, чтобы руда не пропала.
-        if (currency != null) {
-            for (Player player : getServer().getOnlinePlayers()) {
-                if (player.getOpenInventory().getTopInventory().getHolder() instanceof DepositGui.Holder) {
-                    currency.settleDeposit(player, player.getOpenInventory().getTopInventory());
-                    player.closeInventory();
+        // Если у кого-то открыто окно депозита или сдачи — рассчитаться, чтобы вложенное не пропало:
+        // плагин выключается раньше, чем сервер закрывает игрокам окна, и событие закрытия до нас не дойдёт.
+        // Каждого игрока — отдельно и под try: сбой у одного не должен оставить без расчёта остальных
+        // и тем более без сохранения счетов ниже.
+        for (Player player : getServer().getOnlinePlayers()) {
+            try {
+                var top = player.getOpenInventory().getTopInventory();
+                if (currency != null && top.getHolder() instanceof DepositGui.Holder) {
+                    currency.settleDeposit(player, top);
+                } else if (market != null && top.getHolder() instanceof SellGui.Holder) {
+                    settleSaleOnShutdown(player, top);
                 }
+            } catch (RuntimeException e) {
+                getLogger().warning("Не удалось рассчитать открытое окно игрока " + player.getName() + ": " + e);
             }
         }
-        if (market != null) {
-            market.save();
+        try {
+            if (market != null) {
+                market.save();
+            }
+        } finally {
+            if (accounts != null) {
+                accounts.save();
+            }
         }
-        if (accounts != null) {
-            accounts.save();
+    }
+
+    /**
+     * Окно сдачи, открытое в момент выключения: торгуемое сдаём как обычно, остальное возвращаем.
+     * Без сообщений и диалогов — игрока уже отключают.
+     */
+    private void settleSaleOnShutdown(Player player, org.bukkit.inventory.Inventory inventory) {
+        for (int slot = 0; slot < Math.min(SellGui.FREE_SLOTS, inventory.getSize()); slot++) {
+            org.bukkit.inventory.ItemStack stack = inventory.getItem(slot);
+            if (stack == null) {
+                continue;
+            }
+            inventory.setItem(slot, null);
+            if (market.isTradeable(stack.getType()) && !stack.hasItemMeta()) {
+                market.supply(player.getUniqueId(), player.getName(), stack.getType(), stack.getAmount());
+            } else {
+                player.getInventory().addItem(stack).values()
+                        .forEach(left -> player.getWorld().dropItemNaturally(player.getLocation(), left));
+            }
         }
     }
 

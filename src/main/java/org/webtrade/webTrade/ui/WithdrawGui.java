@@ -61,7 +61,15 @@ public final class WithdrawGui extends PagedGui {
         return entries;
     }
 
-    private void take(Player player, Material material, int size, ClickType click) {
+    private void take(Player player, Material material, int requested, ClickType click) {
+        // Ячейка нарисована раньше, чем по ней кликнули: выдаём не больше, чем в контейнере есть сейчас,
+        // иначе по устаревшей ячейке можно получить предметы, которые уже не спишутся.
+        Container.Line line = container.line(material);
+        int size = Math.min(requested, line == null ? 0 : line.readyToWithdraw());
+        if (size <= 0) {
+            refresh();
+            return;
+        }
         boolean drop = click == ClickType.CONTROL_DROP || click == ClickType.DROP;
 
         int given;

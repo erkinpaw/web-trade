@@ -58,7 +58,7 @@ public final class AccountManager {
             yaml.set(base + ".balance", account.balance());
         }
         try {
-            yaml.save(file);
+            org.webtrade.webTrade.SafeFiles.save(yaml, file);
         } catch (IOException e) {
             throw new RuntimeException("Не удалось сохранить accounts.yml", e);
         }
@@ -97,12 +97,19 @@ public final class AccountManager {
     }
 
     public synchronized void deposit(UUID uuid, String name, double amount) {
+        if (!(amount > 0) || Double.isInfinite(amount)) {
+            return; // ноль, минус и NaN счёт не меняют: зачисление не должно уметь списывать
+        }
         Account account = getOrCreate(uuid, name);
         account.setBalance(account.balance() + amount);
     }
 
     /** Списывает amount, если хватает средств. true при успехе. */
     public synchronized boolean withdraw(UUID uuid, double amount) {
+        // минус превратил бы списание в зачисление, а NaN проходит любое сравнение «меньше»
+        if (!(amount >= 0) || Double.isInfinite(amount)) {
+            return false;
+        }
         Account account = accounts.get(uuid);
         if (account == null || account.balance() < amount) {
             return false;

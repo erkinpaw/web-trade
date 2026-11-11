@@ -44,12 +44,22 @@ public final class StandView {
 
     private static final Color TRANSPARENT = Color.fromARGB(0, 0, 0, 0);
     /**
-     * Подложка (чёрный бетон) и подсветка (серый бетон: у стекла видны прожилки текстуры) — тонкие пластины (block display). У них точная
-     * геометрия: фон текста растягивался бы со шрифтовыми отступами и съезжал вбок.
+     * Подложка, полосы и кнопка — цветные прямоугольники: это фон надписи из одного пробела,
+     * растянутый до нужного размера. В отличие от пластины из блока у него ровный цвет без
+     * текстуры. Геометрию фона см. в {@link #rectShape}.
+     * <p>
+     * Все цвета непрозрачные, полутона смешаны с подложкой заранее. Полупрозрачные слои игра
+     * рисует в произвольном порядке: слой, нарисованный раньше подложки, прорезает в ней окно,
+     * и сквозь доску виден мир за ней.
      */
-    private static final BlockData PANEL = Material.BLACK_CONCRETE.createBlockData();
-    private static final BlockData HOVER = Material.GRAY_CONCRETE.createBlockData();
-    private static final BlockData NONE = Material.AIR.createBlockData();
+    private static final Color PANEL = Color.fromARGB(255, 9, 14, 26);
+    private static final Color RULE = Color.fromARGB(255, 250, 204, 21);
+    private static final Color ZEBRA = Color.fromARGB(255, 16, 23, 40);
+    private static final Color HOVER = Color.fromARGB(255, 69, 61, 25);
+    private static final Color TRACK = Color.fromARGB(255, 30, 38, 56);
+    private static final Color THUMB = Color.fromARGB(255, 214, 170, 20);
+    private static final Color BUTTON = Color.fromARGB(255, 234, 179, 8);
+    private static final Color BUTTON_HOVER = Color.fromARGB(255, 253, 224, 71);
 
     private static final float ICON_SCALE = 0.26f;
     /** Толщина значка: почти ноль — модель предмета становится плоской картинкой. */
@@ -72,18 +82,21 @@ public final class StandView {
 
     private final List<Entity> spawned = new ArrayList<>();
     private final List<ItemDisplay> icons = new ArrayList<>();
-    /** Полоса под каждой строкой: подсветка просто включается, а не ездит — так она не мигает. */
-    private final List<BlockDisplay> strips = new ArrayList<>();
+    /** Полоса под каждой строкой: подсветка просто меняет ей цвет, а не ездит — так она не мигает. */
+    private final List<TextDisplay> strips = new ArrayList<>();
     private final List<TextDisplay> names = new ArrayList<>();
     private final List<TextDisplay> demands = new ArrayList<>();
     private final List<TextDisplay> prices = new ArrayList<>();
 
     private TextDisplay header;
     private TextDisplay footer;
+    private TextDisplay thumb;
+    private TextDisplay button;
     private Interaction menu;
 
     private int offset;
     private int hovered = -1;
+    private boolean menuHovered;
     private List<StandContent.Row> rows = List.of();
 
     public StandView(Plugin plugin, BoardLayout layout, Player viewer, StandContent content,
@@ -98,25 +111,38 @@ public final class StandView {
     // ---------- сборка ----------
 
     public void spawn() {
-        panel(layout.panel(), layout.panelWidth(), layout.panelHeight(), PANEL, 0.06f);
+        rect(layout.panel(), layout.panelWidth(), layout.panelHeight(), PANEL, 0.06f);
+        if (CALIBRATE) {
+            // красная пластина точного размера позади подложки: где она выглядывает — там прямоугольник не дотянут
+            panel(layout.panel(), layout.panelWidth(), layout.panelHeight(), Material.RED_CONCRETE.createBlockData(), 0.08f);
+        }
 
         header = text(layout.header(), HEADER_SCALE);
-        caption(layout.captions(), BoardLayout.NAME_LEFT, "ресурс", LEFT);
-        caption(layout.captions(), BoardLayout.DEMAND_RIGHT, "нужно", RIGHT);
-        caption(layout.captions(), BoardLayout.PRICE_RIGHT, "за стак", RIGHT);
+        rect(layout.rule(), layout.panelWidth() - 0.5, 0.02, RULE, 0.04f);
+        caption(layout.captions(), BoardLayout.NAME_LEFT, "РЕСУРС", LEFT);
+        caption(layout.captions(), BoardLayout.DEMAND_RIGHT, "НУЖНО", RIGHT);
+        caption(layout.captions(), BoardLayout.PRICE_RIGHT, "ЗА СТАК", RIGHT);
 
         for (int row = 0; row < layout.rows(); row++) {
             // полосы чуть ближе подложки, иначе они мерцают, деля с ней одну глубину
-            strips.add(panel(layout.row(row), layout.panelWidth() - 0.2, layout.rowHeight(), NONE, 0.03f));
+            strips.add(rect(layout.row(row), layout.panelWidth() - 0.2, layout.rowHeight(), stripColor(row), 0.04f));
             icons.add(icon(layout.icon(row)));
             names.add(text(layout.name(row), TEXT_SCALE));
             demands.add(text(layout.demand(row), TEXT_SCALE));
             prices.add(text(layout.price(row), TEXT_SCALE));
         }
 
+        // полоса прокрутки: дорожка на все строки и бегунок — какая часть списка сейчас видна
+        rect(layout.scrollTrack(), SCROLL_WIDTH, layout.scrollHeight(), TRACK, 0.04f);
+        thumb = rect(layout.scrollTrack(), SCROLL_WIDTH, layout.scrollHeight(), TRANSPARENT, 0.03f);
+
         footer = text(layout.footer(), CAPTION_SCALE);
-        text(layout.menuButton(), MENU_SCALE).text(Ui.text("[ МЕНЮ ]", NamedTextColor.GREEN));
-        menu = hitbox(layout.menuButton(), 1.9, 0.55);
+        Location buttonBottom = layout.menuButton().add(0, -BoardLayout.MENU_HEIGHT / 2, 0);
+        button = rect(buttonBottom, BoardLayout.MENU_WIDTH, BoardLayout.MENU_HEIGHT, BUTTON, 0.04f);
+        TextDisplay label = text(layout.menuButton(), MENU_SCALE);
+        label.setShadowed(false);
+        put(label, MENU_SCALE, 0, "МЕНЮ", NamedTextColor.BLACK);
+        menu = hitbox(layout.menuButton(), BoardLayout.MENU_WIDTH, 0.55);
 
         refresh();
     }
@@ -146,8 +172,36 @@ public final class StandView {
         footer.text(rows.isEmpty()
                 ? Ui.text("заказов сейчас нет", NamedTextColor.GRAY)
                 : Ui.text((offset + 1) + "–" + Math.min(rows.size(), offset + layout.rows())
-                        + " из " + rows.size() + "   ·   колесо мыши", NamedTextColor.GRAY));
+                        + " из " + rows.size()
+                        + (rows.size() > layout.rows() ? "   ·   листай колесом мыши" : ""), NamedTextColor.GRAY));
         paintHover();
+        paintThumb();
+    }
+
+    /** Бегунок: его высота — доля видимых строк, место — доля пролистанного. Список помещается целиком — бегунка нет. */
+    private void paintThumb() {
+        int total = rows.size();
+        if (total <= layout.rows()) {
+            thumb.setBackgroundColor(TRANSPARENT);
+            return;
+        }
+        double track = layout.scrollHeight();
+        double height = track * layout.rows() / total;
+        double fromTop = track * offset / total;
+        thumb.setTransformation(rectShape(SCROLL_WIDTH, height, 0.03f, track - fromTop - height));
+        thumb.setBackgroundColor(THUMB);
+    }
+
+    /** Кнопка «Меню» светлеет, пока игрок на неё смотрит. */
+    public void hoverMenu(boolean on) {
+        if (on != menuHovered && button != null) {
+            menuHovered = on;
+            button.setBackgroundColor(on ? BUTTON_HOVER : BUTTON);
+        }
+    }
+
+    private Color stripColor(int visibleRow) {
+        return visibleRow == hovered ? HOVER : visibleRow % 2 == 1 ? ZEBRA : TRANSPARENT;
     }
 
     /** Подсветка строки, на которую игрок смотрит; -1 — ни на какую. */
@@ -165,10 +219,10 @@ public final class StandView {
 
     private void paintHover() {
         for (int i = 0; i < strips.size(); i++) {
-            BlockData wanted = i == hovered ? HOVER : NONE;
+            Color wanted = stripColor(i);
             // шлём изменение только той полосе, у которой оно правда есть
-            if (!strips.get(i).getBlock().equals(wanted)) {
-                strips.get(i).setBlock(wanted);
+            if (!wanted.equals(strips.get(i).getBackgroundColor())) {
+                strips.get(i).setBackgroundColor(wanted);
             }
         }
     }
@@ -287,6 +341,8 @@ public final class StandView {
         prices.clear();
         header = null;
         footer = null;
+        thumb = null;
+        button = null;
         menu = null;
     }
 
@@ -301,7 +357,9 @@ public final class StandView {
             display.setViewRange(VIEW_RANGE);
             display.setTransformation(new Transformation(
                     new Vector3f(0, 0, 0),
-                    new AxisAngle4f(0, 0, 0, 1),
+                    // Предмет на display-сущности игра рисует развёрнутым на пол-оборота: без этого
+                    // поворота зритель видит значок с изнанки — блоки снизу, ступеньки вверх ногами.
+                    new AxisAngle4f((float) Math.PI, 0, 1, 0),
                     new Vector3f(ICON_SCALE, ICON_SCALE, ICON_DEPTH),
                     new AxisAngle4f(0, 0, 0, 1)));
         });
@@ -321,10 +379,46 @@ public final class StandView {
         });
     }
 
+    private static final double SCROLL_WIDTH = 0.05;
+    /** -Dwebtrade.stand.calibrate=true: показать сверочную пластину (для проверки после обновления игры). */
+    private static final boolean CALIBRATE = Boolean.getBoolean("webtrade.stand.calibrate");
+    /** Фон надписи из одного пробела при масштабе 1: пробел 4 px и 1 px поля — в ширину, строка 9 px и поля — в высоту. */
+    private static final float RECT_WIDTH = 5 * PIXEL;
+    private static final float RECT_HEIGHT = 10 * PIXEL;
+
+    /** Цветной прямоугольник width×height: низ и середина — в точке спавна, behind — насколько он позади текста. */
+    private TextDisplay rect(Location bottomCenter, double width, double height, Color color, float behind) {
+        return spawn(bottomCenter, TextDisplay.class, display -> {
+            display.setBillboard(Display.Billboard.FIXED);
+            display.text(Component.text(" "));
+            display.setBackgroundColor(color);
+            display.setBrightness(FULL_BRIGHT);
+            display.setViewRange(VIEW_RANGE);
+            display.setSeeThrough(false);
+            display.setShadowed(false);
+            display.setTransformation(rectShape(width, height, behind, 0));
+        });
+    }
+
     /**
-     * Пластина фона: блок, растянутый до width×height и сплющенный до тонкого листа.
-     * Блок рисуется от своего угла, поэтому сдвигаем его на половину ширины влево и чуть
-     * назад — за текст.
+     * Растяжение фона до width×height. Фон игра рисует не по центру надписи, а на полпикселя
+     * правее — при растяжении в десятки раз это уже заметный сдвиг, поэтому возвращаем его назад.
+     *
+     * @param lift насколько поднять прямоугольник над точкой спавна
+     */
+    private static Transformation rectShape(double width, double height, float behind, double lift) {
+        float sx = (float) (width / RECT_WIDTH);
+        float sy = (float) (height / RECT_HEIGHT);
+        return new Transformation(
+                new Vector3f(-PIXEL / 2 * sx, (float) lift, -behind),
+                new AxisAngle4f(0, 0, 0, 1),
+                new Vector3f(sx, sy, 1f),
+                new AxisAngle4f(0, 0, 0, 1));
+    }
+
+    /**
+     * Пластина из блока: растянута до width×height и сплющена до тонкого листа. Сейчас нужна
+     * только для сверки геометрии прямоугольников (см. {@link #CALIBRATE}).
      */
     private BlockDisplay panel(Location bottomCenter, double width, double height, BlockData block, float behind) {
         return spawn(bottomCenter, BlockDisplay.class, display -> {
