@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -369,10 +370,125 @@ public final class StandManager implements Listener {
         // Отодвигаем вперёд, чтобы стенд не оказался внутри игрока.
         anchor.add(admin.getLocation().getDirection().setY(0).normalize().multiply(4.0));
 
-        stands.add(BoardLayout.of(anchor, DEFAULT_ROWS));
+        BoardLayout stand = BoardLayout.of(anchor, DEFAULT_ROWS);
+        stands.add(stand);
         save();
         admin.sendMessage(Ui.text("Стенд поставлен. Всего стендов: " + stands.size(),
                 NamedTextColor.GREEN));
+        center(stand, admin::sendMessage);
+    }
+
+    // ---------- выравнивание ----------
+
+    /** Как далеко в стороны от края доски ищем стену, в блоках. */
+    private static final double CENTER_REACH = 4.0;
+    /** Шаг поиска края стены: сотая блока — глазу уже не видно. */
+    private static final double CENTER_STEP = 0.01;
+
+    /** Выровнять ближайший к админу стенд. false — рядом стендов нет. */
+    public boolean centerNearest(Player admin) {
+        BoardLayout nearby = nearest(admin.getLocation(), HIDE_RADIUS);
+        if (nearby == null) {
+            return false;
+        }
+        center(nearby, admin::sendMessage);
+        return true;
+    }
+
+    /** Выровнять все стенды (из консоли). */
+    public void centerAll(java.util.function.Consumer<net.kyori.adventure.text.Component> report) {
+        new ArrayList<>(stands).forEach(stand -> center(stand, report));
+    }
+
+    /**
+     * Ставит стенд ровно: поворот — точно по стороне света, а сама доска — посередине между
+     * стенами слева и справа. Раньше стенд смотрел туда же, куда админ (358.95° вместо 0°), и
+     * стоял там, где админ стоял: один край уходил в стену, с другого — щель.
+     * <p>
+     * Стену ищем по форме блоков, а не по «целый/не целый»: стекло-панель, забор, ступенька
+     * считаются по тому, что у них правда занимает место. Если стены нет с одной из сторон в
+     * пределах {@link #CENTER_REACH} от края доски, стенд остаётся на месте по ширине, но
+     * поворот всё равно выравнивается.
+     * <p>
+     * Folia: блоки читаем в регионе, которому принадлежит стенд.
+     */
+    private void center(BoardLayout stand, java.util.function.Consumer<net.kyori.adventure.text.Component> report) {
+        Location anchor = stand.anchor();
+        plugin.getServer().getRegionScheduler().run(plugin, anchor, t -> {
+            Location straight = anchor.clone();
+            straight.setYaw(Math.round(anchor.getYaw() / 90f) * 90f % 360f);
+            BoardLayout squared = new BoardLayout(straight, stand.rows(), stand.rowHeight(), stand.width());
+
+            double half = squared.panelWidth() / 2;
+            double left = wallDistance(squared, -1, half + CENTER_REACH);
+            double right = wallDistance(squared, 1, half + CENTER_REACH);
+            String how;
+            if (Double.isNaN(left) || Double.isNaN(right)) {
+                how = "стены с обеих сторон не нашлось — выровнен только поворот";
+            } else {
+                double shift = (right - left) / 2;
+                straight.add(squared.rightward().multiply(shift));
+                double opening = left + right;
+                how = String.format(Locale.ROOT, "проём %.2f, доска %.2f блока, сдвиг %.2f", opening, squared.panelWidth(), shift)
+                        + (opening < squared.panelWidth() ? " — проём уже доски, края зайдут в стены" : "");
+            }
+            BoardLayout fixed = new BoardLayout(straight, stand.rows(), stand.rowHeight(), stand.width());
+            int index = stands.indexOf(stand);
+            if (index < 0) {
+                return; // стенд успели убрать
+            }
+            stands.set(index, fixed);
+            save();
+            // тем, кто сейчас у этого стенда, пересоздаём доску на новом месте
+            views.forEach((id, view) -> {
+                if (view.layout() == stand) {
+                    Player viewer = plugin.getServer().getPlayer(id);
+                    if (viewer != null) {
+                        viewer.getScheduler().run(plugin, s -> {
+                            if (views.remove(id, view)) {
+                                view.despawn();
+                            }
+                        }, null);
+                    }
+                }
+            });
+            report.accept(Ui.text("Стенд выровнен: " + how + ".", NamedTextColor.GREEN));
+        });
+    }
+
+    /**
+     * Расстояние от середины доски до ближайшей стены в сторону side (-1 влево, +1 вправо),
+     * или NaN, если до maxDistance стены нет. Пробуем всю высоту доски и её толщину.
+     */
+    private static double wallDistance(BoardLayout stand, int side, double maxDistance) {
+        World world = stand.anchor().getWorld();
+        double bottom = stand.panel().getY();
+        double top = bottom + stand.panelHeight();
+        org.bukkit.util.Vector across = stand.rightward().multiply(side);
+        org.bukkit.util.Vector normal = stand.normal();
+        for (double d = 0; d <= maxDistance; d += CENTER_STEP) {
+            for (double y = bottom + 0.02; y <= top - 0.02; y += 0.25) {
+                for (double depth : new double[]{0.02, -0.04, -0.09}) {
+                    Location point = stand.anchor().clone().add(across.clone().multiply(d)).add(normal.clone().multiply(depth));
+                    point.setY(y);
+                    if (solidAt(world, point)) {
+                        return d;
+                    }
+                }
+            }
+        }
+        return Double.NaN;
+    }
+
+    private static boolean solidAt(World world, Location point) {
+        org.bukkit.block.Block block = world.getBlockAt(point);
+        org.bukkit.util.Vector inside = point.toVector().subtract(block.getLocation().toVector());
+        for (org.bukkit.util.BoundingBox box : block.getCollisionShape().getBoundingBoxes()) {
+            if (box.contains(inside)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean removeNearest(Player admin) {

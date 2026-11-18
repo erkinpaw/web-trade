@@ -11,7 +11,7 @@ import org.webtrade.webTrade.ui.Ui;
 
 import java.util.Locale;
 
-/** /tradestand create|remove|list — расстановка стендов торгового центра. */
+/** /tradestand create|center|remove|list — расстановка стендов торгового центра. */
 public final class StandCommand implements CommandExecutor {
 
     private final StandManager stands;
@@ -23,11 +23,17 @@ public final class StandCommand implements CommandExecutor {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
                              @NotNull String label, @NotNull String[] args) {
+        String action = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("Только для игроков.");
+            // из консоли (и по RCON) можно только выровнять сразу все стенды
+            if (action.equals("center")) {
+                stands.centerAll(sender::sendMessage);
+                sender.sendMessage("Выравниваю стендов: " + stands.count());
+            } else {
+                sender.sendMessage("Из консоли: /tradestand center — выровнять все стенды.");
+            }
             return true;
         }
-        String action = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
         switch (action) {
             case "create" -> stands.create(player);
             case "remove" -> {
@@ -37,10 +43,15 @@ public final class StandCommand implements CommandExecutor {
                     player.sendMessage(Ui.text("Рядом нет стенда.", NamedTextColor.RED));
                 }
             }
+            case "center" -> {
+                if (!stands.centerNearest(player)) {
+                    player.sendMessage(Ui.text("Рядом нет стенда.", NamedTextColor.RED));
+                }
+            }
             case "list" -> player.sendMessage(Ui.text("Стендов всего: " + stands.count(),
                     NamedTextColor.YELLOW));
             default -> player.sendMessage(Ui.text(
-                    "Использование: /tradestand create | remove | list", NamedTextColor.YELLOW));
+                    "Использование: /tradestand create | center | remove | list", NamedTextColor.YELLOW));
         }
         return true;
     }
