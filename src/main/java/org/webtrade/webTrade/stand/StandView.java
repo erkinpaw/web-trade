@@ -58,6 +58,7 @@ public final class StandView {
     private static final Color HOVER = Color.fromARGB(255, 69, 61, 25);
     private static final Color TRACK = Color.fromARGB(255, 30, 38, 56);
     private static final Color THUMB = Color.fromARGB(255, 214, 170, 20);
+    private static final Color THUMB_HOVER = Color.fromARGB(255, 253, 224, 71);
     private static final Color BUTTON = Color.fromARGB(255, 234, 179, 8);
     private static final Color BUTTON_HOVER = Color.fromARGB(255, 253, 224, 71);
 
@@ -72,6 +73,19 @@ public final class StandView {
     private static final float VIEW_RANGE = 0.6f;
     /** Подложка тёмная, поэтому светим всё изнутри — иначе ночью стенд не прочитать. */
     private static final Display.Brightness FULL_BRIGHT = new Display.Brightness(15, 15);
+
+    /**
+     * Слои доски, в блоках позади надписей. У каждого слоя своя глубина: два прямоугольника на
+     * одной глубине, которые перекрываются, мерцают («рябь») — игра каждый кадр по-разному решает,
+     * какой из них ближе. Так мерцала полоса прокрутки поверх полос строк.
+     */
+    private static final float DEPTH_BACK = 0.075f;
+    private static final float DEPTH_PANEL = 0.06f;
+    private static final float DEPTH_STRIP = 0.045f;
+    private static final float DEPTH_TRACK = 0.03f;
+    private static final float DEPTH_THUMB = 0.015f;
+    /** Зажатая ПКМ повторяет нажатие раз в 4 тика (200 мс); тянем, пока повторы идут, с запасом на пинг. */
+    private static final long DRAG_HOLD_MS = 350;
 
     private final Plugin plugin;
     private final BoardLayout layout;
@@ -93,10 +107,16 @@ public final class StandView {
     private TextDisplay thumb;
     private TextDisplay button;
     private Interaction menu;
+    private Interaction scrollbar;
 
     private int offset;
     private int hovered = -1;
     private boolean menuHovered;
+    private boolean thumbLit;
+    /** До какого момента бегунок считается схваченным (обновляется каждым повтором ПКМ). */
+    private long dragUntil;
+    /** Где игрок схватил бегунок: расстояние от верха бегунка до курсора, в блоках. */
+    private double grab;
     private List<StandContent.Row> rows = List.of();
 
     public StandView(Plugin plugin, BoardLayout layout, Player viewer, StandContent content,
@@ -111,21 +131,24 @@ public final class StandView {
     // ---------- сборка ----------
 
     public void spawn() {
-        rect(layout.panel(), layout.panelWidth(), layout.panelHeight(), PANEL, 0.06f);
+        rect(layout.panel(), layout.panelWidth(), layout.panelHeight(), PANEL, DEPTH_PANEL);
+        // Изнанка: фон надписи игра рисует только лицевой стороной, и сзади сквозь доску было
+        // видно мир. Позади всего — такой же прямоугольник, развёрнутый лицом назад.
+        backPlate(layout.panel(), layout.panelWidth(), layout.panelHeight());
         if (CALIBRATE) {
             // красная пластина точного размера позади подложки: где она выглядывает — там прямоугольник не дотянут
             panel(layout.panel(), layout.panelWidth(), layout.panelHeight(), Material.RED_CONCRETE.createBlockData(), 0.08f);
         }
 
         header = text(layout.header(), HEADER_SCALE);
-        rect(layout.rule(), layout.panelWidth() - 0.5, 0.02, RULE, 0.04f);
+        rect(layout.rule(), layout.panelWidth() - 0.5, 0.02, RULE, DEPTH_STRIP);
         caption(layout.captions(), BoardLayout.NAME_LEFT, "РЕСУРС", LEFT);
         caption(layout.captions(), BoardLayout.DEMAND_RIGHT, "НУЖНО", RIGHT);
         caption(layout.captions(), BoardLayout.PRICE_RIGHT, "ЗА СТАК", RIGHT);
 
         for (int row = 0; row < layout.rows(); row++) {
             // полосы чуть ближе подложки, иначе они мерцают, деля с ней одну глубину
-            strips.add(rect(layout.row(row), layout.panelWidth() - 0.2, layout.rowHeight(), stripColor(row), 0.04f));
+            strips.add(rect(layout.row(row), layout.panelWidth() - 0.2, layout.rowHeight(), stripColor(row), DEPTH_STRIP));
             icons.add(icon(layout.icon(row)));
             names.add(text(layout.name(row), TEXT_SCALE));
             demands.add(text(layout.demand(row), TEXT_SCALE));
@@ -133,12 +156,16 @@ public final class StandView {
         }
 
         // полоса прокрутки: дорожка на все строки и бегунок — какая часть списка сейчас видна
-        rect(layout.scrollTrack(), SCROLL_WIDTH, layout.scrollHeight(), TRACK, 0.04f);
-        thumb = rect(layout.scrollTrack(), SCROLL_WIDTH, layout.scrollHeight(), TRANSPARENT, 0.03f);
+        // дорожка лежит поверх полос строк, бегунок — поверх дорожки: у каждого своя глубина
+        rect(layout.scrollTrack(), SCROLL_WIDTH, layout.scrollHeight(), TRACK, DEPTH_TRACK);
+        thumb = rect(layout.scrollTrack(), SCROLL_WIDTH, layout.scrollHeight(), TRANSPARENT, DEPTH_THUMB);
+        // за полосу можно взяться: зажать ПКМ и вести мышь вверх-вниз
+        scrollbar = hitbox(layout.scrollMiddle(), BoardLayout.SCROLL_HIT_WIDTH, layout.scrollHeight() + 0.1);
 
         footer = text(layout.footer(), CAPTION_SCALE);
+        footer.setLineWidth(1000); // подсказка в одну строку: по умолчанию игра переносит текст шире 200 px
         Location buttonBottom = layout.menuButton().add(0, -BoardLayout.MENU_HEIGHT / 2, 0);
-        button = rect(buttonBottom, BoardLayout.MENU_WIDTH, BoardLayout.MENU_HEIGHT, BUTTON, 0.04f);
+        button = rect(buttonBottom, BoardLayout.MENU_WIDTH, BoardLayout.MENU_HEIGHT, BUTTON, DEPTH_STRIP);
         TextDisplay label = text(layout.menuButton(), MENU_SCALE);
         label.setShadowed(false);
         put(label, MENU_SCALE, 0, "МЕНЮ", NamedTextColor.BLACK);
@@ -173,7 +200,7 @@ public final class StandView {
                 ? Ui.text("заказов сейчас нет", NamedTextColor.GRAY)
                 : Ui.text((offset + 1) + "–" + Math.min(rows.size(), offset + layout.rows())
                         + " из " + rows.size()
-                        + (rows.size() > layout.rows() ? "   ·   листай колесом мыши" : ""), NamedTextColor.GRAY));
+                        + (rows.size() > layout.rows() ? "   ·   колесо мыши или ПКМ по полосе" : ""), NamedTextColor.GRAY));
         paintHover();
         paintThumb();
     }
@@ -188,8 +215,57 @@ public final class StandView {
         double track = layout.scrollHeight();
         double height = track * layout.rows() / total;
         double fromTop = track * offset / total;
-        thumb.setTransformation(rectShape(SCROLL_WIDTH, height, 0.03f, track - fromTop - height));
-        thumb.setBackgroundColor(THUMB);
+        thumb.setTransformation(rectShape(SCROLL_WIDTH, height, DEPTH_THUMB, track - fromTop - height));
+        thumb.setBackgroundColor(thumbLit ? THUMB_HOVER : THUMB);
+    }
+
+    /** Бегунок светлеет, пока на нём курсор или его тянут. */
+    public void hoverScrollbar(boolean on) {
+        boolean lit = on || dragging();
+        if (lit != thumbLit && thumb != null) {
+            thumbLit = lit;
+            paintThumb();
+        }
+    }
+
+    // ---------- перетаскивание бегунка ----------
+
+    public boolean dragging() {
+        return System.currentTimeMillis() < dragUntil;
+    }
+
+    /**
+     * Нажатие ПКМ по полосе прокрутки — первое или очередной повтор зажатой кнопки.
+     * Первое нажатие запоминает, за какое место бегунка взялись: схватил за бегунок — он не
+     * прыгает под курсор, а едет вместе с ним; нажал мимо — бегунок встаёт серединой под курсор.
+     *
+     * @param height высота курсора над якорем, в блоках
+     */
+    public void dragPing(double height) {
+        if (!dragging()) {
+            int total = rows.size();
+            double track = layout.scrollHeight();
+            double fromTop = layout.scrollTop() - height;
+            double thumbTop = total == 0 ? 0 : track * offset / total;
+            double thumbHeight = total == 0 ? track : track * Math.min(total, layout.rows()) / total;
+            grab = fromTop >= thumbTop && fromTop <= thumbTop + thumbHeight
+                    ? fromTop - thumbTop : thumbHeight / 2;
+        }
+        dragUntil = System.currentTimeMillis() + DRAG_HOLD_MS;
+        dragTo(height);
+        hoverScrollbar(true);
+    }
+
+    /** Поставить бегунок так, чтобы схваченная точка оказалась на высоте курсора. */
+    public void dragTo(double height) {
+        int total = rows.size();
+        int max = Math.max(0, total - layout.rows());
+        if (max == 0) {
+            return;
+        }
+        double fromTop = layout.scrollTop() - height - grab;
+        int wanted = (int) Math.round(fromTop / layout.scrollHeight() * total);
+        scroll(Math.clamp(wanted, 0, max) - offset);
     }
 
     /** Кнопка «Меню» светлеет, пока игрок на неё смотрит. */
@@ -302,6 +378,10 @@ public final class StandView {
         }
     }
 
+    public boolean isScrollbar(Entity entity) {
+        return scrollbar != null && scrollbar.getUniqueId().equals(entity.getUniqueId());
+    }
+
     /** Кликнули по сущности стенда. true — это была кнопка «Меню». */
     public boolean click(Player player, Entity clicked) {
         if (menu == null || !clicked.getUniqueId().equals(menu.getUniqueId())) {
@@ -316,7 +396,7 @@ public final class StandView {
     }
 
     public boolean owns(Entity entity) {
-        return menu != null && menu.getUniqueId().equals(entity.getUniqueId());
+        return menu != null && menu.getUniqueId().equals(entity.getUniqueId()) || isScrollbar(entity);
     }
 
     // ---------- уборка ----------
@@ -344,6 +424,8 @@ public final class StandView {
         thumb = null;
         button = null;
         menu = null;
+        scrollbar = null;
+        dragUntil = 0;
     }
 
     // ---------- спавн отдельных кусочков ----------
@@ -379,7 +461,7 @@ public final class StandView {
         });
     }
 
-    private static final double SCROLL_WIDTH = 0.05;
+    private static final double SCROLL_WIDTH = 0.08;
     /** -Dwebtrade.stand.calibrate=true: показать сверочную пластину (для проверки после обновления игры). */
     private static final boolean CALIBRATE = Boolean.getBoolean("webtrade.stand.calibrate");
     /** Фон надписи из одного пробела при масштабе 1: пробел 4 px и 1 px поля — в ширину, строка 9 px и поля — в высоту. */
@@ -397,6 +479,27 @@ public final class StandView {
             display.setSeeThrough(false);
             display.setShadowed(false);
             display.setTransformation(rectShape(width, height, behind, 0));
+        });
+    }
+
+    /** Изнанка доски: прямоугольник цвета подложки, развёрнутый лицом от зрителя, позади всех слоёв. */
+    private void backPlate(Location bottomCenter, double width, double height) {
+        spawn(bottomCenter, TextDisplay.class, display -> {
+            display.setBillboard(Display.Billboard.FIXED);
+            display.text(Component.text(" "));
+            display.setBackgroundColor(PANEL);
+            display.setBrightness(FULL_BRIGHT);
+            display.setViewRange(VIEW_RANGE);
+            display.setSeeThrough(false);
+            display.setShadowed(false);
+            float sx = (float) (width / RECT_WIDTH);
+            float sy = (float) (height / RECT_HEIGHT);
+            // поворот на пол-оборота зеркалит и полпиксельный сдвиг фона — возвращаем его в другую сторону
+            display.setTransformation(new Transformation(
+                    new Vector3f(PIXEL / 2 * sx, 0, -DEPTH_BACK),
+                    new AxisAngle4f((float) Math.PI, 0, 1, 0),
+                    new Vector3f(sx, sy, 1f),
+                    new AxisAngle4f(0, 0, 0, 1)));
         });
     }
 

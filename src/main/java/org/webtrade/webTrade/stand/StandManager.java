@@ -61,6 +61,9 @@ public final class StandManager implements Listener {
     private final Map<UUID, Long> lastScroll = new java.util.concurrent.ConcurrentHashMap<>();
     /** В какую сторону игрок крутит в этой серии: +1 вниз по списку, -1 вверх. */
     private final Map<UUID, Integer> scrollDirection = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Кто сейчас тянет бегунок: за ним следим каждый тик, а не раз в {@link #TASK_PERIOD}. */
+    private final Map<UUID, io.papermc.paper.threadedregions.scheduler.ScheduledTask> drags =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     private io.papermc.paper.threadedregions.scheduler.ScheduledTask task;
     /** Счётчик тиков: цифры на стенде обновляем реже, чем следим за подходом игроков. */
@@ -139,8 +142,11 @@ public final class StandManager implements Listener {
                 return;
             }
             double[] at = view.layout().look(player.getEyeLocation(), player.getEyeLocation().getDirection(), LOOK_DISTANCE);
-            view.hover(at == null ? -1 : view.layout().rowAt(at[1]));
+            boolean onBar = at != null && view.layout().onScrollbar(at[0], at[1]);
+            // на полосе прокрутки и пока её тянут строку не подсвечиваем — курсор не на ней
+            view.hover(at == null || onBar || view.dragging() ? -1 : view.layout().rowAt(at[1]));
             view.hoverMenu(at != null && view.layout().onMenu(at[0], at[1]));
+            view.hoverScrollbar(onBar);
             // Спрос меняется от чужих сделок — раз в две секунды освежаем цифры сами.
             if (refresh) {
                 view.refresh();
@@ -185,6 +191,12 @@ public final class StandManager implements Listener {
         StandView view = views.get(event.getPlayer().getUniqueId());
         if (view != null && view.owns(event.getRightClicked())) {
             event.setCancelled(true);
+            if (view.isScrollbar(event.getRightClicked())) {
+                if (event.getHand() == EquipmentSlot.HAND) {
+                    drag(event.getPlayer(), view);
+                }
+                return;
+            }
             // клиент шлёт нажатие за каждую руку, а зажатая ПКМ повторяет его — открываем раз в полсекунды
             if (event.getHand() == EquipmentSlot.HAND && cooldown(event.getPlayer())) {
                 view.click(event.getPlayer(), event.getRightClicked());
@@ -200,9 +212,49 @@ public final class StandManager implements Listener {
         StandView view = views.get(player.getUniqueId());
         if (view != null && view.owns(event.getEntity())) {
             event.setCancelled(true);
+            if (view.isScrollbar(event.getEntity())) {
+                drag(player, view); // ЛКМ не повторяется сама: просто переставить бегунок под курсор
+                return;
+            }
             if (cooldown(player)) {
                 view.click(player, event.getEntity());
             }
+        }
+    }
+
+    /**
+     * Перетаскивание бегунка. Ванильный клиент не сообщает, зажата ли кнопка мыши, но зажатая ПКМ
+     * по сущности повторяет нажатие раз в 4 тика — каждый повтор продлевает «захват». Пока он
+     * длится, каждый тик ставим бегунок под точку, куда смотрит игрок: список едет за мышью
+     * плавно, а не рывками раз в 4 тика. Отпустил кнопку — повторы прекратились, захват истёк.
+     */
+    private void drag(Player player, StandView view) {
+        double[] at = view.layout().lookAnywhere(player.getEyeLocation(), player.getEyeLocation().getDirection(), LOOK_DISTANCE);
+        if (at == null) {
+            return;
+        }
+        view.dragPing(at[1] * view.layout().rowHeight());
+        UUID id = player.getUniqueId();
+        if (drags.containsKey(id)) {
+            return;
+        }
+        var task = player.getScheduler().runAtFixedRate(plugin, t -> {
+            StandView current = views.get(id);
+            if (current != view || !view.dragging() || !player.isOnline()) {
+                t.cancel();
+                drags.remove(id);
+                if (current == view) {
+                    view.hoverScrollbar(false);
+                }
+                return;
+            }
+            double[] look = view.layout().lookAnywhere(player.getEyeLocation(), player.getEyeLocation().getDirection(), LOOK_DISTANCE * 2);
+            if (look != null) {
+                view.dragTo(look[1] * view.layout().rowHeight());
+            }
+        }, () -> drags.remove(id), 1L, 1L);
+        if (task != null) {
+            drags.put(id, task);
         }
     }
 
@@ -297,6 +349,7 @@ public final class StandManager implements Listener {
         scrollHome.remove(event.getPlayer().getUniqueId());
         lastScroll.remove(event.getPlayer().getUniqueId());
         scrollDirection.remove(event.getPlayer().getUniqueId());
+        drags.remove(event.getPlayer().getUniqueId());
         StandView view = views.remove(event.getPlayer().getUniqueId());
         if (view != null) {
             view.despawn();

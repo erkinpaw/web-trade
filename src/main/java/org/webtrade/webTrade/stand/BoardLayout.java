@@ -35,6 +35,8 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
     private static final double MENU_ROW = -1.95;
     private static final double RULE_ROW = 1.62;
     static final double SCROLL_X = 2.72;
+    /** Ширина «ручки» полосы прокрутки, за которую её можно схватить: шире самой полосы, чтобы не промахнуться. */
+    static final double SCROLL_HIT_WIDTH = 0.36;
     /** Кнопка «Меню»: размеры в блоках. */
     static final double MENU_WIDTH = 1.9;
     static final double MENU_HEIGHT = 0.36;
@@ -141,6 +143,11 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
         return at(SCROLL_X, ROW_STRIP_FROM);
     }
 
+    /** Середина полосы прокрутки по высоте — сюда ставим её хитбокс. */
+    public Location scrollMiddle() {
+        return at(SCROLL_X, ROW_STRIP_FROM + rows / 2.0);
+    }
+
     public double scrollHeight() {
         return rows * rowHeight;
     }
@@ -161,6 +168,22 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
      * @return {сдвиг вбок в блоках, высота в строках от якоря} или null, если мимо доски
      */
     public double[] look(Location eye, Vector direction, double maxDistance) {
+        double[] hit = lookAnywhere(eye, direction, maxDistance);
+        if (hit == null) {
+            return null;
+        }
+        double side = hit[0];
+        double level = hit[1];
+        boolean inside = Math.abs(side) <= panelWidth() / 2
+                && level >= PANEL_BOTTOM && level <= PANEL_BOTTOM + panelHeight() / rowHeight;
+        return inside ? hit : null;
+    }
+
+    /**
+     * Как {@link #look}, но без проверки краёв доски: точка на её плоскости, даже если взгляд
+     * ушёл за край. Нужна, пока тянут бегунок, — увёл мышь выше доски, а список стоит в начале.
+     */
+    public double[] lookAnywhere(Location eye, Vector direction, double maxDistance) {
         if (eye.getWorld() == null || !eye.getWorld().equals(anchor.getWorld())) {
             return null;
         }
@@ -175,11 +198,18 @@ public record BoardLayout(Location anchor, int rows, double rowHeight, double wi
             return null;
         }
         Vector hit = eye.toVector().add(direction.clone().multiply(distance)).subtract(anchor.toVector());
-        double side = hit.dot(rightward());
-        double level = hit.getY() / rowHeight;
-        boolean inside = Math.abs(side) <= panelWidth() / 2
-                && level >= PANEL_BOTTOM && level <= PANEL_BOTTOM + panelHeight() / rowHeight;
-        return inside ? new double[]{side, level} : null;
+        return new double[]{hit.dot(rightward()), hit.getY() / rowHeight};
+    }
+
+    /** Смотрит ли игрок на полосу прокрутки (сдвиг вбок и высота — как их отдаёт {@link #look}). */
+    public boolean onScrollbar(double side, double level) {
+        return Math.abs(side - SCROLL_X) <= SCROLL_HIT_WIDTH / 2
+                && level >= ROW_STRIP_FROM - 0.2 && level <= ROW_STRIP_FROM + rows + 0.2;
+    }
+
+    /** Высота верха полосы прокрутки над якорем, в блоках. */
+    public double scrollTop() {
+        return (ROW_STRIP_FROM + rows) * rowHeight;
     }
 
     /** Строка списка под этой высотой (в строках от якоря), или -1. */
